@@ -48,7 +48,13 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 ```
 
 - Perintah kontrol juga boleh membawa `"code"` langsung (alternatif `auth` untuk HTTP).
-- Salah 5× berturut-turut → semua percobaan ditolak 30 detik (`ev":"locked"`, field `lock` = sisa detik).
+- Proteksi tebak kode **per klien** (firmware 0.3.2+): Bluetooth punya hitungan sendiri, klien WiFi dihitung per **alamat IP**
+  (HTTP dan WebSocket dari IP yang sama berbagi hitungan; sambung ulang tidak mereset). Salah 5× → klien itu saja ditolak
+  30 detik (`ev":"locked"`, field `lock` = sisa detik). Setelah pernah dikunci, tiap salah berikutnya langsung mengunci lagi
+  2× lebih lama: 30 dtk → 1 → 2 → 4 → 8 → maks 15 menit. Kode benar mereset; 15 menit tanpa salah juga mereset.
+  Penyerang di WiFi tidak bisa mengunci pemilik di Bluetooth atau di IP lain. Tabel menyimpan 8 IP; kalau penuh oleh IP yang
+  sedang dihukum, IP WiFi **baru** ikut ditahan sampai ada slot bebas (Bluetooth dan sesi yang sudah login tidak terpengaruh).
+- `GET /api/status` membawa `lock` milik IP peminta (tanpa `auth`/`ev`).
 - `newcode` 4–12 karakter ASCII tanpa spasi · `appass` 8–63 karakter (AP restart ±2 detik) · `btpin` tepat 6 angka (pairing lama dihapus).
 - Ganti `newcode` mengunci semua sesi lain; sesi yang mengganti tetap terbuka.
 - Tahan tombol BOOT (GPIO0) 8 detik saat jalan → kredensial kembali default (`1234` / `rzmong123` / `123456`), `ev":"reset"`.
@@ -62,8 +68,8 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 {"cmd":"theme","id":1}                          // tema layar bulat: 0 siang, 1 malam, 2 stance
 {"cmd":"manual","axle":"front","action":"fill"} // fill | dump | stop (tahan tombol → kirim stop saat dilepas)
 {"cmd":"stop"}                                  // semua katup tutup + leveling otomatis BERHENTI sampai preset dipilih
-{"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA (khusus firmware dengan WiFi)
-{"cmd":"wifi","appass":"sandiBaru8"}            // (lama) ganti sandi SoftAP; butuh sesi terbuka, berlaku ±2 detik
+{"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA; ssid ≤32, pass kosong atau 8–63 (selain itu bad_input)
+{"cmd":"wifi","appass":"sandiBaru8","code":"…"} // (lama) ganti sandi SoftAP; 0.3.2+: wajib "code" saat ini, berlaku ±2 detik
 ```
 
 Semua perintah di atas kecuali `stop` butuh sesi yang sudah `auth`.
@@ -73,7 +79,8 @@ Perilaku katup (firmware 0.3.1+):
   `action:"stop"` datang, koneksi pengirim (BLE / WebSocket) putus, sudah 20 dtk (`MANUAL_MAX_MS`), atau tekanan mencapai
   `BAG_MAX` (isi) / `BAG_MIN` (buang). Setelah dilepas, leveling otomatis kembali ke target preset.
 - `stop` menutup semua katup dan menahan leveling (`"hold":true`) sampai `preset` atau `set` dikirim, atau ACC memicu
-  naik/turun otomatis. Manual tetap bisa dipakai saat hold.
+  naik/turun otomatis. Manual tetap bisa dipakai saat hold. Mulai 0.3.2 hold **disimpan di flash** (NVS `rzm`/`hold`, ditulis
+  hanya saat berubah), jadi tetap aktif setelah listrik putus, restart, atau watchdog.
 - `preset`/`set` juga membuka kunci fault (`bocor`, `buang macet`, `kompresor`) untuk mencoba lagi.
 - `set` dengan `axle` selain `front`/`rear` ditolak (`ev":"bad_input"`).
 

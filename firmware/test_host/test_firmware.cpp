@@ -19,6 +19,7 @@ bool adsPresent = true;
 float adsVolts[4] = {0.5f, 0.5f, 0.5f, 0.5f};
 long adsPolls = 0;
 std::map<std::string, std::map<std::string, std::vector<uint8_t>>> nvs;
+long nvsWrites = 0;
 uint32_t blePasskey = 0;
 int bleBonds = 0;
 std::vector<std::string> bleNotify;
@@ -76,7 +77,9 @@ static JsonDocument ble(const std::string &line, bool chunk = true) {
   return parse(sim::bleNotify.empty() ? "{}" : sim::bleNotify.back());
 }
 static JsonDocument wsSend(uint8_t n, const std::string &t) { ws.text(n, t); return parse(ws.sent[n].back()); }
-static JsonDocument post(const std::string &b) { return parse(http.request("/api/cmd", HTTP_POST, String(b)).s); }
+static const IPAddress IP_OWNER(192, 168, 4, 2), IP_ATK(192, 168, 4, 66);
+static JsonDocument post(const std::string &b, IPAddress from = IP_OWNER) { return parse(http.request("/api/cmd", HTTP_POST, String(b), from).s); }
+static uint32_t lockOf(IPAddress ip) { return lockLeftMs((uint32_t)ip); }
 
 // ---------------- tes ----------------
 static void t_boot_default() {
@@ -107,17 +110,17 @@ static void t_auth_lockout() {
   CHECK(r["ev"] == "auth_ok" && r["auth"] == true, "kunci tidak berakhir setelah 30 dtk");
   // Perintah HTTP membawa code salah juga dihitung
   for (int i = 0; i < 5; i++) post("{\"cmd\":\"preset\",\"id\":0,\"code\":\"9999\"}");
-  CHECK(lockLeftMs() > 0, "HTTP salah 5x harus mengunci");
+  CHECK(lockOf(IP_OWNER) > 0, "HTTP salah 5x harus mengunci");
 }
 
 static void t_lockout_millis_wrap() {
   boot(0xFFFFFFFFu - 10000);   // millis() akan meluap (49,7 hari) di tengah masa kunci
   for (int i = 0; i < 5; i++) post("{\"cmd\":\"auth\",\"code\":\"x000\"}");
-  CHECK(lockLeftMs() > 25000, "kunci tidak aktif dekat overflow");
+  CHECK(lockOf(IP_OWNER) > 25000, "kunci tidak aktif dekat overflow");
   run(20000);
-  CHECK(lockLeftMs() > 0 && lockLeftMs() <= 10000, "kunci salah setelah overflow: %u", lockLeftMs());
+  CHECK(lockOf(IP_OWNER) > 0 && lockOf(IP_OWNER) <= 10000, "kunci salah setelah overflow: %u", lockOf(IP_OWNER));
   run(11000);
-  CHECK(lockLeftMs() == 0, "kunci tidak pernah lepas setelah overflow");
+  CHECK(lockOf(IP_OWNER) == 0, "kunci tidak pernah lepas setelah overflow");
   auto r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}");
   CHECK(r["ev"] == "auth_ok", "login setelah overflow gagal");
 }
@@ -176,7 +179,7 @@ static void t_bad_json() {
                         "\xff\xfe\x00garbage", "{\"cmd\":\"auth\",\"code\":\"" "\\u0000" "1234\"}"};
   for (auto j : junk) { post(j); bleConnect(); ble(j, false); }
   std::string deep(5000, '['); post(deep);
-  authLockUntil = 0; authFails = 0;   // sampah di atas memang memicu kunci salah kode — lepas untuk lanjut uji
+  memset(authSlots, 0, sizeof(authSlots));   // sampah di atas memang memicu kunci salah kode — lepas untuk lanjut uji
   std::string big = "{\"cmd\":\"auth\",\"code\":\"" + std::string(3000, 'A') + "\"}";
   http.request("/api/cmd", HTTP_POST, String(big));
   CHECK(http.lastCode == 413, "body >2048 harus 413");
@@ -419,7 +422,7 @@ static void t_status_fits_ble() {
   boot();
   bleConnect();
   fault = "belakang buang macet";
-  authLockUntil = millis() + 29000;
+  authSlots[0] = {KEY_BLE, true, 0, 1, millis() + 29000, millis()};
   bleSession.authed = true; bleSession.ev = "bad_newcode";
   sim::pinIn[PIN_BOOT] = LOW; run(2000);
   sim::bleNotify.clear(); run(300);
@@ -480,6 +483,140 @@ static void t_ble_thread_race() {
   CHECK(ok && writes > 100, "loop macet / tidak ada tulisan (%ld)", (long)writes);
 }
 
+// ---- 0.3.2: kunci salah kode per klien ----
+static void t_lockout_per_client() {
+  boot();
+  bleConnect();
+  ws.connect(1, IP_OWNER);
+  JsonDocument r;
+  for (int i = 0; i < 5; i++) r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK);
+  CHECK(r["ev"] == "locked" && r["lock"] == 30, "penyerang harus terkunci 30 dtk: %s", http.lastBody.c_str());
+  auto b = ble("{\"cmd\":\"auth\",\"code\":\"1234\"}");
+  CHECK(b["ev"] == "auth_ok" && !b["lock"].is<int>(), "BUG: penyerang WiFi mengunci pemilik di Bluetooth");
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}", IP_OWNER);
+  CHECK(r["ev"] == "auth_ok" && !r["lock"].is<int>(), "BUG: penyerang mengunci IP lain: %s", http.lastBody.c_str());
+  auto w = wsSend(1, "{\"cmd\":\"auth\",\"code\":\"1234\"}");
+  CHECK(w["ev"] == "auth_ok", "WebSocket pemilik ikut terkunci");
+  ws.connect(0, IP_ATK);
+  w = wsSend(0, "{\"cmd\":\"auth\",\"code\":\"1234\"}");
+  CHECK(w["ev"] == "locked", "IP penyerang lewat WebSocket harus tetap terkunci (slot dibagi HTTP+WS)");
+  ws.disconnect(0); ws.connect(0, IP_ATK);
+  w = wsSend(0, "{\"cmd\":\"auth\",\"code\":\"1234\"}");
+  CHECK(w["ev"] == "locked", "sambung ulang WebSocket tidak boleh mereset hitungan");
+  // Bluetooth salah 5x tidak mengunci WiFi
+  for (int i = 0; i < 5; i++) b = ble("{\"cmd\":\"auth\",\"code\":\"9999\"}");
+  CHECK(b["ev"] == "locked", "BLE salah 5x harus mengunci BLE");
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}", IP_OWNER);
+  CHECK(r["ev"] == "auth_ok", "BLE terkunci tidak boleh mengunci WiFi");
+  auto g = parse(http.request("/api/status", HTTP_GET, String(), IP_ATK).s);
+  CHECK(g["lock"].is<int>() && !g["auth"].is<bool>(), "GET /api/status harus membawa sisa kunci IP peminta: %s", http.lastBody.c_str());
+  g = parse(http.request("/api/status", HTTP_GET, String(), IP_OWNER).s);
+  CHECK(!g["lock"].is<int>(), "GET /api/status IP pemilik tidak boleh membawa kunci penyerang");
+  std::string all = http.request("/api/status", HTTP_GET).s + http.lastBody.s;
+  CHECK(all.find("1234") == std::string::npos, "kode bocor di status");
+}
+
+static void t_lockout_escalation() {
+  boot();
+  JsonDocument r;
+  for (int i = 0; i < 5; i++) r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK);
+  CHECK(r["lock"] == 30, "kunci pertama 30 dtk");
+  run(31000);
+  r = post("{\"cmd\":\"auth\",\"code\":\"0001\"}", IP_ATK);
+  CHECK(r["ev"] == "locked" && r["lock"] == 60, "salah lagi setelah dikunci → 60 dtk (dapat %s)", http.lastBody.c_str());
+  run(61000);
+  r = post("{\"cmd\":\"auth\",\"code\":\"0002\"}", IP_ATK);
+  CHECK(r["lock"] == 120, "lalu 120 dtk");
+  run(121000);
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}", IP_ATK);
+  CHECK(r["ev"] == "auth_ok", "kode benar setelah kunci habis harus diterima");
+  for (int i = 0; i < 4; i++) r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK);
+  CHECK(r["ev"] == "bad_code", "kode benar mereset hitungan");
+  // Maksimum 15 menit
+  for (int k = 0; k < 8; k++) { run(lockOf(IP_ATK) + 1000); r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK); }
+  CHECK(r["lock"] == 900, "kunci terlama 15 menit (dapat %s)", http.lastBody.c_str());
+  // 15 menit tanpa salah setelah kunci habis → mulai dari nol
+  run(900000 + 900000 + 1000);
+  for (int i = 0; i < 4; i++) r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK);
+  CHECK(r["ev"] == "bad_code", "hukuman tidak meluruh setelah 15 menit");
+}
+
+static void t_lockout_ip_rotation() {
+  boot();
+  bleConnect();
+  ws.connect(1, IP_OWNER);
+  wsSend(1, "{\"cmd\":\"auth\",\"code\":\"1234\"}");   // pemilik sudah login lewat WebSocket
+  long guesses = 0;
+  uint32_t t0 = millis();
+  while (millis() - t0 < 600000) {          // 10 menit, penyerang memakai 50 IP berbeda
+    for (int ip = 100; ip < 150; ip++) {
+      auto r = post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IPAddress(192, 168, 4, ip));
+      if (r["ev"] == "bad_code") guesses++;
+    }
+    run(1000);
+  }
+  // Tebakan yang benar-benar dicek = bad_code + tebakan yang memicu kunci (tercatat di serial)
+  for (size_t p = 0; (p = sim::serialLog.find("kode salah berulang dari WiFi", p)) != std::string::npos; p++) guesses++;
+  fprintf(stderr, "    (penyerang 50 IP: %ld tebakan dicek dari ±30.000 percobaan dalam 10 menit)\n", guesses);
+  CHECK(guesses <= 120, "penyerang berganti IP bisa menebak %ld kali dalam 10 menit", guesses);
+  auto b = ble("{\"cmd\":\"auth\",\"code\":\"1234\"}");
+  CHECK(b["ev"] == "auth_ok", "pemilik di Bluetooth harus tetap bisa masuk");
+  auto w = wsSend(1, "{\"cmd\":\"preset\",\"id\":2}");
+  CHECK(w["auth"] == true && w["preset"] == 2, "sesi WebSocket pemilik yang sudah login terganggu");
+  auto r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}", IPAddress(192, 168, 4, 200));
+  CHECK(r["ev"] == "locked", "IP baru saat tabel penuh penyerang seharusnya ditahan (dapat %s)", http.lastBody.c_str());
+}
+
+// ---- 0.3.2: STOP tersimpan di flash ----
+static void t_hold_persist() {
+  boot();
+  setPsi(150, 20, 20); run(300);
+  post("{\"cmd\":\"stop\"}");
+  CHECK(sim::nvs["rzm"]["hold"] == std::vector<uint8_t>{1}, "STOP tidak disimpan ke NVS");
+  long w = sim::nvsWrites;
+  for (int i = 0; i < 20; i++) { post("{\"cmd\":\"stop\"}"); run(100); }
+  CHECK(sim::nvsWrites == w, "STOP berulang menulis flash %ld kali", sim::nvsWrites - w);
+  post("{\"cmd\":\"preset\",\"id\":1,\"code\":\"1234\"}");
+  CHECK(sim::nvs["rzm"]["hold"] == std::vector<uint8_t>{0}, "preset tidak menghapus hold di NVS");
+}
+
+static void t_hold_after_reboot() {
+  sim::nvs["rzm"]["hold"] = {1};            // STOP aktif sebelum restart / watchdog
+  sim::now = 1000; setPsi(150, 20, 20);
+  setup();
+  run(3000);
+  CHECK(!anyValve(), "BUG: setelah restart leveling jalan lagi padahal STOP aktif");
+  auto r = parse(http.request("/api/status", HTTP_GET).s);
+  CHECK(r["hold"] == true && r["fault"] == "STOP: pilih preset", "status hold tidak tampil: %s", http.lastBody.c_str());
+  post("{\"cmd\":\"preset\",\"id\":1,\"code\":\"1234\"}");
+  run(300);
+  CHECK(on(PIN_FILL_F) && on(PIN_FILL_R), "preset tidak melanjutkan leveling setelah restart");
+}
+
+static void t_nvs_write_on_change() {
+  boot();
+  post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"preset\",\"id\":1}");
+  long w = sim::nvsWrites;
+  for (int i = 0; i < 10; i++) post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"preset\",\"id\":1}\n{\"cmd\":\"set\",\"axle\":\"front\",\"psi\":50}\n{\"cmd\":\"theme\",\"id\":1}");
+  CHECK(sim::nvsWrites == w, "perintah tanpa perubahan menulis flash %ld kali", sim::nvsWrites - w);
+  post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"preset\",\"id\":2}");
+  CHECK(sim::nvsWrites == w + 1, "ganti preset harus tepat 1 tulisan (dapat %ld)", sim::nvsWrites - w);
+}
+
+static void t_wifi_cmd_validation() {
+  boot();
+  auto r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"wifi\",\"ssid\":\"" + std::string(33, 'a') + "\",\"pass\":\"12345678\"}");
+  CHECK(r["ev"] == "bad_input" && staSsid.length() == 0, "SSID >32 harus ditolak");
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"wifi\",\"ssid\":\"Rumah\",\"pass\":\"12345\"}");
+  CHECK(r["ev"] == "bad_input", "sandi router 5 karakter harus ditolak");
+  post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"wifi\",\"ssid\":\"Rumah\",\"pass\":\"rahasia123\"}");
+  CHECK(staSsid == "Rumah", "SSID valid tidak disimpan");
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"wifi\",\"appass\":\"sandibaru99\"}");
+  CHECK(r["ev"] == "bad_code" && apPass == "rzmong123", "ganti sandi AP (perintah lama) tanpa kode saat ini harus ditolak");
+  r = post("{\"cmd\":\"auth\",\"code\":\"1234\"}\n{\"cmd\":\"wifi\",\"appass\":\"sandibaru99\",\"code\":\"1234\"}");
+  CHECK(r["ev"] == "saved" && apPass == "sandibaru99", "ganti sandi AP dengan kode harus berhasil");
+}
+
 struct T { const char *name; void (*fn)(); };
 static const T TESTS[] = {
   {"boot & kredensial default", t_boot_default},
@@ -502,6 +639,13 @@ static const T TESTS[] = {
   {"NVS rusak", t_corrupt_nvs},
   {"ukuran status BLE", t_status_fits_ble},
   {"watchdog loop", t_watchdog},
+  {"kunci salah kode per klien (BLE / IP / WS)", t_lockout_per_client},
+  {"kunci bertingkat 30 dtk → 15 mnt + peluruhan", t_lockout_escalation},
+  {"penyerang berganti-ganti IP", t_lockout_ip_rotation},
+  {"STOP disimpan di NVS (tulis saat berubah)", t_hold_persist},
+  {"STOP tetap aktif setelah restart/watchdog", t_hold_after_reboot},
+  {"NVS hanya ditulis saat berubah", t_nvs_write_on_change},
+  {"validasi perintah wifi", t_wifi_cmd_validation},
   {"BLE tulis paralel (thread) vs loop()", t_ble_thread_race},
   {"fuzz 3000 langkah: isi+buang tidak bersamaan, STOP", t_fuzz_invariants},
 };

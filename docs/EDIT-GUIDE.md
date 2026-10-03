@@ -319,12 +319,16 @@ Perintah protokolnya (`auth`, `logout`, `security`) ada di `docs/PROTOKOL.md`.
 4. Di HP: lupakan/unpair `RZM-AIR`, sambungkan ulang, lalu segera ganti kredensial default.
 
 Mengubah pin atau lama tahan: konstanta `PIN_BOOT` (0 untuk ESP32 klasik/esp32dev; **9** untuk ESP32-C3), `PIN_LED`, dan
-`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode: `AUTH_MAX_FAIL` (5) dan `AUTH_LOCK_MS` (30 dtk).
+`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode (per klien: Bluetooth / per IP WiFi): `AUTH_MAX_FAIL` (5), `AUTH_LOCK_MS` (30 dtk, berlipat tiap kunci),
+`AUTH_LOCK_MAX_MS` (15 mnt), `AUTH_DECAY_MS` (15 mnt), `AUTH_SLOTS` (1 BLE + 8 IP).
 
 ### Catatan keamanan
 - Status JSON tidak pernah memuat kode, sandi, atau PIN. Log protokol di UI menyamarkannya (`••••`).
 - Tombol **STOP** (tutup semua katup) tetap diterima tanpa kode, demi keselamatan. Mulai 0.3.1 STOP juga menghentikan
-  leveling otomatis sampai preset dipilih lagi (status `hold:true`, fault `STOP: pilih preset`).
+  leveling otomatis sampai preset dipilih lagi (status `hold:true`, fault `STOP: pilih preset`). Mulai 0.3.2 status ini
+  disimpan di flash, jadi tetap berlaku setelah restart/watchdog.
+- Salah kode dihitung per klien, jadi orang di WiFi tidak bisa mengunci kamu di Bluetooth. Tetap saja: kode 4 angka bisa
+  ditebak pelan-pelan dari banyak IP (±30 tebakan/jam). **Pakai kode akses 8+ karakter campuran** dan ganti sandi WiFi default.
 - Kredensial disimpan apa adanya di flash ESP32. Orang yang memegang modul fisik bisa membaca flash atau menekan BOOT,
   jadi pasang modul di tempat yang tidak mudah dijangkau.
 - WiFi lewat HTTP biasa (tanpa TLS); keamanannya bergantung pada sandi WPA2 `RZMONG-AIR`. BLE terenkripsi setelah pairing.
@@ -347,7 +351,9 @@ test_host/run.sh             # semua tes
 test_host/run.sh STOP        # hanya tes yang namanya mengandung "STOP"
 ```
 Butuh `g++` (Debian/Ubuntu: `sudo apt install g++`). Hasil akhir harus `N lulus, 0 gagal`. Yang diuji antara lain:
-kode akses + kunci 5× salah/30 dtk (termasuk saat `millis()` meluap di hari ke-49), validasi ganti kredensial, rahasia tidak
+kode akses + kunci 5× salah/30 dtk (termasuk saat `millis()` meluap di hari ke-49), kunci per klien (BLE / IP / WebSocket),
+kunci bertingkat sampai 15 menit + peluruhan, penyerang berganti 50 IP, STOP tersimpan di flash & tetap aktif setelah restart,
+flash hanya ditulis saat nilai berubah, validasi perintah `wifi`, validasi ganti kredensial, rahasia tidak
 bocor di status/serial, JSON rusak, BLE+WebSocket+HTTP bersamaan, BLE ditulis dari thread lain (balapan data), STOP, manual
 (tahan tombol, HP putus, batas 20 dtk), timeout bocor 90 dtk, sensor putus/korslet, ADS1115 lepas, kompresor (histeresis +
 batas 10 menit), ACC + debounce starter, tombol BOOT 8 dtk/batal/macet LOW, NVS rusak, ukuran status BLE, watchdog, dan fuzz
