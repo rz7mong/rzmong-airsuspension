@@ -175,3 +175,6 @@ svg.cx{overflow:hidden}
 html[data-theme="anime"] .cx-colors button{background:var(--sw);border-color:#ffd3e4}
 .cx-rod{stroke:#9aa3ad;stroke-width:2.2;fill:none;stroke-linecap:round}
 .cx-bellow{fill:#1b1d22;stroke:#3a3e46;stroke-width:.8}
+/* mobil pixel art */
+.cx-pix{display:flex;justify-content:center;width:100%;overflow:hidden;border-radius:12px}
+.cx-pix canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:10px}
