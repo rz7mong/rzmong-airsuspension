@@ -1,8 +1,8 @@
 import os
 D=os.path.dirname(os.path.abspath(__file__))
 import json
-fd=json.load(open(D+'/fd_cfg.json'))
-FD=dict(k=0.27,R=12,archR=14,axleR=(112,280),axleF=(489,280),body=fd['body'],glass=fd['glass'],mirror=fd['mirror'],
+kz=json.load(open(D+'/kaze_cfg.json'))
+KAZE=dict(k=0.27,R=12,archR=14,axleR=(112,280),axleF=(489,280),body=kz['body'],glass=kz['glass'],mirror=kz['mirror'],
  belt=187,low=277,sill=297,
  shoulder=[(26,197),(130,195),(270,198),(410,204),(532,215)],
  dark=[[(19,262),(70,262),(72,293),(22,293)]],
@@ -14,12 +14,12 @@ FD=dict(k=0.27,R=12,archR=14,axleR=(112,280),axleF=(489,280),body=fd['body'],gla
  head=[[(533,213),(562,216),(575,225),(572,235),(556,231),(538,222)]],
  tail=[[(19,193),(38,191),(38,197),(19,198)],[(19,200),(35,199),(35,209),(19,210)],[(19,212),(32,211),(30,220),(19,221)]],
  headpt=(576,228))
-FD.update(wind=[(366,146),(392,152),(420,161),(445,171),(452,175),(440,179),(418,171),(392,159),(370,151)],
+KAZE.update(wind=[(366,146),(392,152),(420,161),(445,171),(452,175),(440,179),(418,171),(392,159),(370,151)],
  tail=[[(19,192),(40,190),(40,197),(19,198)],[(19,200),(37,199),(37,210),(19,211)],[(19,213),(34,212),(31,221),(19,222)]],
  streaks=[(218,2),(236,1)])
-FD.update(head=[[(530,212),(552,214),(568,219),(577,226),(574,236),(560,233),(545,226),(534,220)]], mid2=258)
-zx=json.load(open(D+'/zx_cfg.json')); ac=json.load(open(D+'/ac_cfg.json'))
-ZENIX=dict(k=0.289,R=13,archR=15,axleR=(137,199),axleF=(475,199),body=zx['body'],glass=zx['glass'],
+KAZE.update(head=[[(530,212),(552,214),(568,219),(577,226),(574,236),(560,233),(545,226),(534,220)]], mid2=258)
+lu=json.load(open(D+'/lumora_cfg.json')); ro=json.load(open(D+'/ronin_cfg.json'))
+LUMORA=dict(k=0.289,R=13,archR=15,axleR=(137,199),axleF=(475,199),body=lu['body'],glass=lu['glass'],
  belt=101,low=196,sill=214,
  shoulder=[(24,112),(150,110),(300,112),(420,117),(530,127)],
  dark=[[(19,182),(60,184),(62,208),(28,208)]],
@@ -30,7 +30,7 @@ ZENIX=dict(k=0.289,R=13,archR=15,axleR=(137,199),axleF=(475,199),body=zx['body']
  head=[[(486,116),(512,119),(530,127),(528,134),(505,130),(490,124)]],
  tail=[[(19,97),(52,99),(84,107),(80,117),(50,115),(19,112)]],
  headpt=(548,135))
-ACCORD=dict(k=0.262,R=12,archR=14,axleR=(150,198),axleF=(525,198),body=ac['body'],glass=ac['glass'],mirror=ac['mirror'],
+RONIN=dict(k=0.262,R=12,archR=14,axleR=(150,198),axleF=(525,198),body=ro['body'],glass=ro['glass'],mirror=ro['mirror'],
  belt=122,low=208,sill=225,
  shoulder=[(36,128),(200,125),(460,127),(664,136)],
  chromelines=[[(33,174),(668,175)]],
@@ -41,9 +41,9 @@ ACCORD=dict(k=0.262,R=12,archR=14,axleR=(150,198),axleF=(525,198),body=ac['body'
  tail=[[(31,137),(50,136),(52,166),(32,167)]],
  extras=[dict(idx=18,pts=[(654,162),(670,162),(670,168),(654,168)])],
  headpt=(670,154))
-SHOW=dict(FD)
-SHOW['extra_bounds']=[(-2,126),(602,304)]
-SHOW['extras']=[
+KAZESHOW=dict(KAZE)
+KAZESHOW['extra_bounds']=[(-2,126),(602,304)]
+KAZESHOW['extras']=[
  dict(idx=19,line=1,inglass=1,pts=[(250,140),(250,190)]),dict(idx=19,line=1,inglass=1,pts=[(250,146),(150,190)]),dict(idx=19,line=1,inglass=1,pts=[(250,150),(340,190)]),
  dict(idx=20,outline=1,pts=[(41,188),(48,188),(43,146),(36,146)]),dict(idx=20,outline=1,pts=[(63,184),(70,184),(68,144),(61,144)]),
  dict(idx=20,outline=1,top=9,pts=[(0,140),(112,134),(114,145),(2,151)]),
@@ -51,5 +51,5 @@ SHOW['extras']=[
  dict(idx=20,outline=1,pts=[(566,248),(598,241),(598,247),(568,254)]),dict(idx=20,outline=1,pts=[(570,262),(600,257),(600,263),(572,267)]),
  dict(idx=20,outline=1,top=9,pts=[(450,296),(600,293),(600,302),(450,303)]),
  dict(idx=20,outline=1,pts=[(12,284),(28,284),(28,298),(12,298)])]
-ACCORD.update(k=0.25,wind=[(452,52),(480,70),(510,92),(545,110),(528,112),(490,100),(462,88),(455,60)])
-SHOW['extras'][-2]=dict(idx=20,outline=1,top=9,pts=[(535,296),(600,293),(600,302),(535,303)])
+RONIN.update(k=0.25,wind=[(452,52),(480,70),(510,92),(545,110),(528,112),(490,100),(462,88),(455,60)])
+KAZESHOW['extras'][-2]=dict(idx=20,outline=1,top=9,pts=[(535,296),(600,293),(600,302),(535,303)])
