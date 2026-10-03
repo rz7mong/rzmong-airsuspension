@@ -53,7 +53,7 @@ Urutan nyala pertama, solenoid belum dipasang ke udara:
 ## 4. Firmware
 
 1. Pasang board package ESP32 di Arduino IDE.
-2. Library: Adafruit ADS1X15, Adafruit GFX, Adafruit GC9A01A, ArduinoJson 7, WebSockets (Markus Sattler). Preferences/WiFi/WebServer bawaan core ESP32.
+2. Library: Adafruit ADS1X15, Adafruit GFX, Adafruit GC9A01A, ArduinoJson 7, WebSockets (Markus Sattler), PubSubClient (remote internet, firmware 0.4.0+). Preferences/WiFi/WebServer bawaan core ESP32.
 3. Buka `firmware/rzmong_airsuspension/rzmong_airsuspension.ino`.
 4. Board: ESP32 Dev Module. Flash size 4 MB. **Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS)** — BLE + WiFi + UI web lebih dari 1,3 MB. Upload speed 115200.
 5. Serial monitor 115200. Harus muncul `WiFi AP RZMONG-AIR  IP 192.168.4.1` lalu `RZM-AIR ready`.

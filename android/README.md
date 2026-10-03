@@ -26,3 +26,9 @@ dan lokasi HP harus aktif agar scan BLE jalan.
 UI aplikasi sama dengan `web/control`, jadi jendela **KODE AKSES** dan kartu **🔒 KEAMANAN** ikut ada di APK.
 Saat pertama sambung Bluetooth, Android memunculkan dialog pairing → masukkan PIN Bluetooth (default `123456`).
 Kalau PIN modul diganti atau direset lewat tombol BOOT, hapus dulu pairing lama: **Pengaturan → Bluetooth → RZM-AIR → Lupakan**.
+
+## Dashboard & remote internet (firmware 0.4.0+)
+
+APK memakai UI yang sama, jadi tampilan **DASHBOARD** (default, tombol ▦/◎ untuk ganti ke klasik) dan jalur **🌐 INTERNET** ikut ada.
+Jalur INTERNET tersambung ke broker MQTT lewat `wss` (izin `INTERNET` sudah ada di manifest), jadi bisa mengontrol mobil dari mana saja
+asal modul tersambung WiFi router. Setup broker & keamanan: `docs/REMOTE.md`.

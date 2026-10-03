@@ -1,6 +1,6 @@
 # RZMONG Airsuspension
 
-Kontroler suspensi udara 2 titik berbasis ESP32. Preset PSI, naik saat kontak hidup, turun saat kontak mati, monitor speedometer, Bluetooth, dan website kontrol.
+Kontroler suspensi udara 2 titik berbasis ESP32. Preset PSI, naik saat kontak hidup, turun saat kontak mati, monitor speedometer, Bluetooth, website kontrol dengan **dashboard** (mobil tampak atas, tekanan 4 balon, tangki, preset), dan **remote lewat internet** (MQTT, opsional).
 
 Repo: https://github.com/rz7mong/rzmong-airsuspension
 
@@ -11,13 +11,16 @@ Sistem ini mengontrol tekanan, bukan tinggi mobil. Depan kiri dan kanan satu sal
 - `docs/TUTORIAL.md` — cara rakit dari nol
 - `docs/WIRING.md` — pin dan jalur udara
 - `firmware/` — sketsa Arduino ESP32
-- `docs/PROTOKOL.md` — protokol BLE & WiFi (perintah, status, endpoint)
+- `docs/PROTOKOL.md` — protokol BLE, WiFi & internet (perintah, status, endpoint, topik MQTT)
+- `docs/REMOTE.md` — **remote internet**: cara kerja, keamanan, langkah membuat broker gratis
 - `docs/EDIT-GUIDE.md` — **panduan edit & build sendiri** (tema, maskot, mobil pixel, firmware, APK, Pages, release)
 - `web/index.html` — landing page
 - `web/flash/` — halaman flash lewat browser (ESP Web Tools + serial monitor), `.bin` di `web/flash/firmware/`
-- `web/control/` — website kontrol (PWA), BLE atau WiFi, juga dibungkus jadi aplikasi Android
+- `web/control/` — website kontrol (PWA): tampilan **DASHBOARD** (default) atau **KLASIK**, jalur BLE / WiFi / INTERNET, juga dibungkus jadi aplikasi Android
+- `web/dashboard/` — pintasan ke dashboard (`/dashboard/`)
 - `android/` — proyek Capacitor (BLE native + WiFi) → APK debug dari GitHub Actions
 - `tools/embed_web.py` — bundel `web/control` ke firmware supaya ESP32 bisa menyajikan UI lewat WiFi
+- `tools/mock_modul.py` (HTTP) & `tools/mock_remote.py` (MQTT) — modul tiruan untuk menguji UI tanpa hardware
 - `.github/workflows/` — build firmware, APK Android, dan deploy GitHub Pages
 
 ## Jalur cepat
@@ -30,9 +33,18 @@ Sistem ini mengontrol tekanan, bukan tinggi mobil. Depan kiri dan kanan satu sal
    - Bluetooth: buka `web/control/` di Chrome HP/laptop, pilih BLUETOOTH, sambungkan `RZM-AIR`. Saat pertama kali, HP minta **PIN pairing** (default `123456`).
    - WiFi: sambungkan HP ke WiFi `RZMONG-AIR` (sandi `rzmong123`), buka `http://192.168.4.1/`.
    - Aplikasi Android: unduh APK dari Releases/Actions, pilih Bluetooth atau WiFi.
+   - Internet (opsional, firmware 0.4.0+): dari mana saja lewat broker MQTT pribadi — ikuti `docs/REMOTE.md`.
 4. Masukkan **kode akses** (default `1234`) saat diminta, lalu langsung ganti semua kredensial default di kartu **🔒 KEAMANAN**.
 
-Halaman kontrol punya mode demo, jadi tampilan bisa dicoba tanpa modul.
+Halaman kontrol punya mode demo, jadi tampilan bisa dicoba tanpa modul. Tombol **▦ / ◎** di atas mengganti tampilan Dashboard ↔ Klasik; tema warna (termasuk **Karbon Pro**) lewat tombol palet.
+
+## Remote internet (firmware 0.4.0+, mati secara default)
+
+- Modul tersambung WiFi router → broker MQTT **TLS 8883**; website (GitHub Pages) & aplikasi → broker yang sama lewat **wss**.
+- Setiap perintah ditandatangani HMAC-SHA256 dengan kode akses (kode tidak dikirim), anti-replay, kunci 30 dtk setelah 5× salah. STOP selalu bisa.
+- Isi/buang manual tidak bisa lewat internet; preset & SEMUA NAIK/TURUN perlu ketuk 2×.
+- Remote hanya bisa diaktifkan lewat koneksi lokal, setelah kode akses default `1234` diganti. Reset BOOT mematikan remote.
+- **Jangan pakai broker publik/tes untuk mobil.** Langkah lengkap (EMQX Cloud Serverless gratis): `docs/REMOTE.md`.
 
 ## Keamanan akses (firmware 0.3.0+)
 

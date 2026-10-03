@@ -1,6 +1,6 @@
 /* RZMONG Airsuspension — pengatur tema bersama (landing, kontroler, flash, aplikasi Android).
  * Muat di <head> TANPA defer supaya tema terpasang sebelum halaman tergambar.
- * Tema: neon (default) | merah | terang | anime. API: window.RZMTheme
+ * Tema: neon (default) | merah | terang | anime | karbon. API: window.RZMTheme
  */
 (function () {
   "use strict";
@@ -10,6 +10,7 @@
     { id: "merah", name: "Cyber Merah", sw: "linear-gradient(135deg,#ff2a4a,#ffb547)", meta: "#0a0306" },
     { id: "terang", name: "Terang", sw: "linear-gradient(135deg,#ffffff,#9cc3ff)", meta: "#eef3fb" },
     { id: "anime", name: "Anime Sakura ✿", sw: "linear-gradient(135deg,#ffd1e3,#b5a8ff)", meta: "#fff5fa" },
+    { id: "karbon", name: "Karbon Pro", sw: "linear-gradient(135deg,#1b1d22,#ff8a1f)", meta: "#0b0c0f" },
   ];
   var root = document.documentElement;
   var ls = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* mode privat */ } } };
@@ -43,6 +44,7 @@
     esp: '<rect x="6" y="6" width="12" height="12" rx="3.5" fill="#e3f3ff"/><path d="M9.5 3v3M14.5 3v3M9.5 18v3M14.5 18v3M3 9.5h3M3 14.5h3M18 9.5h3M18 14.5h3"/>',
     key: '<circle cx="8" cy="12" r="4.2" fill="#fff2d2"/><path d="M12.2 12H21M18 12v3M21 12v2.2"/>',
     flash: '<path d="M13.5 2L5 14h6.5L10.5 22 19 10h-6.5z" fill="#fff2d2"/>',
+    globe: '<circle cx="12" cy="12" r="9.5" fill="#e3f3ff"/><path d="M2.5 12h19M12 2.5c3 3 3 16 0 19M12 2.5c-3 3-3 16 0 19"/>',
     star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z" fill="#fff2d2"/>',
   };
   function icon(name) {

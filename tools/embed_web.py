@@ -20,6 +20,8 @@ FILES = [
     ("/theme.js", "theme.js", "application/javascript"),
     ("/cars-pixel.js", "cars-pixel.js", "application/javascript"),
     ("/cars.js", "cars.js", "application/javascript"),
+    ("/dash.js", "dash.js", "application/javascript"),
+    ("/remote.js", "remote.js", "application/javascript"),  # vendor/mqtt.min.js sengaja TIDAK dibundel (AP modul tanpa internet)
     ("/icons/icon.svg", "icons/icon.svg", "image/svg+xml"),
     ("/icons/icon-192.png", "icons/icon-192.png", "image/png"),
 ]
