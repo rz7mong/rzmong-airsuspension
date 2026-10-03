@@ -20,3 +20,9 @@ Push tag `v*` untuk melampirkannya ke Releases.
 
 Izin: Android 12+ meminta "Perangkat sekitar" (BLUETOOTH_SCAN/CONNECT). Android ≤ 11 meminta lokasi
 dan lokasi HP harus aktif agar scan BLE jalan.
+
+## Keamanan (firmware 0.3.0+)
+
+UI aplikasi sama dengan `web/control`, jadi jendela **KODE AKSES** dan kartu **🔒 KEAMANAN** ikut ada di APK.
+Saat pertama sambung Bluetooth, Android memunculkan dialog pairing → masukkan PIN Bluetooth (default `123456`).
+Kalau PIN modul diganti atau direset lewat tombol BOOT, hapus dulu pairing lama: **Pengaturan → Bluetooth → RZM-AIR → Lupakan**.

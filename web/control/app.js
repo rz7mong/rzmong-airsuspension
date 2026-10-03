@@ -6,6 +6,10 @@
  *  - WiFi: SoftAP "RZMONG-AIR" (IP 192.168.4.1) / STA. WebSocket ws://IP:81/ (baris JSON sama seperti BLE),
  *    cadangan HTTP: GET /api/status, POST /api/cmd (body = baris JSON perintah).
  *  - Field opsional yang belum dikirim firmware: speed (km/j), acc (bool) → UI siap kalau nanti ditambah.
+ *  - Keamanan (firmware ≥0.3.0): BLE wajib pairing PIN (default 123456). Perintah kontrol butuh kode akses:
+ *    kirim {"cmd":"auth","code":"…"} sekali per koneksi (HTTP: diawali di tiap body). Status membawa
+ *    auth (bool), ev (hasil: auth_ok, bad_code, locked, need_auth, saved, …), lock (detik), def, boot.
+ *    Ganti kredensial: {"cmd":"security","code":"<kode saat ini>","newcode":…,"appass":…,"btpin":"6 digit"}.
  */
 (() => {
   "use strict";
@@ -29,6 +33,10 @@
   let connected = false, part = "esp", dragging = null, lastRxLog = 0, hasSpeed = false;
   let showSpeedo = localStorage.getItem("rzm.speedo") !== "0";
   const gps = { id: null, speed: null, last: null };
+  // Kode akses: disimpan di HP hanya kalau pengguna mencentang "Ingat kode".
+  const auth = { ok: false, code: localStorage.getItem("rzm.code") || "", remember: !!localStorage.getItem("rzm.code"), def: false, lock: 0, boot: 0, pending: null, prompted: false };
+  const SECRET_KEYS = ["code", "newcode", "appass", "btpin", "pass"];
+  const OPEN_CMDS = ["auth", "logout", "security", "stop"];   // boleh dikirim sebelum kode akses benar
 
   /* ---------------- maskot (tema anime) ---------------- */
   const say = (t, m, ms) => { if (window.RZMTheme) RZMTheme.mascot.say(t, m, ms); };
@@ -162,9 +170,9 @@
         log("WebSocket tidak tersedia (" + e.message + "), pakai HTTP polling.");
       }
       const st = await this.fetchJson("/api/status");
-      applyStatus(st);
+      applyStatus(st, { poll: true });
       this.timer = setInterval(async () => {
-        try { applyStatus(await this.fetchJson("/api/status")); this.fails = 0; }
+        try { applyStatus(await this.fetchJson("/api/status"), { poll: true }); this.fails = 0; }
         catch (e) { if (++this.fails >= 4) { this.stop(); if (this.onDisc) this.onDisc(); } }
       }, 500);
       return "HTTP " + this.base;
@@ -179,8 +187,10 @@
     },
     async writeLine(line) {
       if (this.ws && this.ws.readyState === 1) { this.ws.send(line + "\n"); return; }
+      // HTTP tanpa sesi: awali body dengan baris auth kalau kode sudah diketahui.
+      const pre = auth.code && !/"cmd":"(auth|security)"/.test(line) ? JSON.stringify({ cmd: "auth", code: auth.code }) + "\n" : "";
       // text/plain = "simple request", tanpa preflight CORS.
-      applyStatus(await this.fetchJson("/api/cmd", { method: "POST", headers: { "Content-Type": "text/plain" }, body: line }));
+      applyStatus(await this.fetchJson("/api/cmd", { method: "POST", headers: { "Content-Type": "text/plain" }, body: pre + line }), { http: true });
     },
     stop() { if (this.timer) clearInterval(this.timer); this.timer = null; },
     async disconnect() { this.onDisc = null; this.stop(); if (this.ws) { this.ws.close(); this.ws = null; } },
@@ -206,12 +216,112 @@
   }
 
   let writeQueue = Promise.resolve();
+  const masked = (obj) => JSON.stringify(obj, (k, v) => (SECRET_KEYS.includes(k) && v ? "••••" : v));
   function send(obj) {
     const line = JSON.stringify(obj);
-    if (!connected) { log((demo ? "[demo] " : "[offline] ") + line, "tx"); return; }
-    log(line, "tx");
+    if (!connected) { log((demo ? "[demo] " : "[offline] ") + masked(obj), "tx"); return; }
+    if (!auth.ok && !OPEN_CMDS.includes(obj.cmd)) {
+      log("Terkunci — masukkan kode akses dulu. Perintah tidak dikirim: " + obj.cmd);
+      showLock("Masukkan kode akses untuk mengontrol suspensi.");
+      return;
+    }
+    log(masked(obj), "tx");
     const t = transport;
     writeQueue = writeQueue.then(() => t.writeLine(line)).catch((e) => log("Gagal kirim: " + (e.message || e)));
+  }
+
+  /* ---------------- kode akses & keamanan ---------------- */
+  const EV_TEXT = {
+    auth_ok: "Kode akses benar — kontrol terbuka.",
+    bad_code: "Kode akses salah.",
+    locked: "Terlalu banyak kode salah. Modul mengunci sementara.",
+    need_auth: "Modul menolak perintah: masukkan kode akses dulu.",
+    saved: "Pengaturan keamanan tersimpan di modul.",
+    bad_newcode: "Kode akses baru harus 4–12 karakter tanpa spasi.",
+    bad_appass: "Sandi WiFi harus 8–63 karakter.",
+    bad_btpin: "PIN Bluetooth harus tepat 6 angka.",
+    bad_input: "Tidak ada yang diubah.",
+    logout: "Kontrol dikunci. Masukkan kode akses untuk membuka lagi.",
+    reset: "Kredensial modul direset ke default lewat tombol BOOT.",
+  };
+  function setAuthOk(ok) {
+    if (auth.ok === ok) return;
+    auth.ok = ok;
+    if (ok) hideLock();
+    syncSecurity();
+  }
+  function showLock(msg) {
+    $("lockMsg").textContent = msg || "";
+    $("lockRemember").checked = auth.remember;
+    $("lock").hidden = false;
+    setTimeout(() => $("lockCode").focus(), 50);
+  }
+  function hideLock() { $("lock").hidden = true; $("lockCode").value = ""; }
+  function tryAuth(code) {
+    auth.code = code;
+    if (!connected) { log("[demo] kode akses dicoba (tidak ada modul)."); hideLock(); return; }
+    send({ cmd: "auth", code });
+  }
+  function onEvent(ev) {
+    const txt = EV_TEXT[ev] || ev;
+    log(txt);
+    if (ev === "auth_ok") {
+      if (auth.remember) localStorage.setItem("rzm.code", auth.code); else localStorage.removeItem("rzm.code");
+      setAuthOk(true);
+      say("Kodenya benar~ silakan kontrol ♡", "happy", 2200);
+    } else if (ev === "bad_code" || ev === "locked") {
+      if (auth.pending) { auth.pending = null; $("secMsg").textContent = ev === "locked" ? EV_TEXT.locked : "Kode akses saat ini salah."; }
+      else { localStorage.removeItem("rzm.code"); showLock(txt + (auth.lock ? ` Coba lagi ${auth.lock} detik.` : "")); }
+      say("Kodenya salah… 🥺", "worry", 2200);
+    } else if (ev === "need_auth" || ev === "logout") {
+      setAuthOk(false); showLock(txt);
+    } else if (ev === "saved") {
+      const p = auth.pending; auth.pending = null;
+      if (p && p.newcode) { auth.code = p.newcode; if (auth.remember) localStorage.setItem("rzm.code", p.newcode); }
+      let extra = "";
+      if (p && p.appass) extra += " WiFi RZMONG-AIR restart ±2 detik: sambungkan ulang HP dengan sandi baru.";
+      if (p && p.btpin) extra += " Di HP, lupakan/unpair RZM-AIR lalu pairing ulang dengan PIN baru.";
+      $("secMsg").textContent = txt + extra;
+      ["secCur", "secNew", "secNew2", "secAp", "secPin"].forEach((id) => { $(id).value = ""; });
+      say("Keamanan diperbarui ✓", "happy", 2000);
+    } else if (ev.startsWith("bad_")) {
+      auth.pending = null; $("secMsg").textContent = txt;
+    } else if (ev === "reset") {
+      localStorage.removeItem("rzm.code"); auth.code = ""; auth.remember = false;
+      setAuthOk(false); showLock(txt + " Kode default: 1234.");
+    }
+    syncSecurity();
+  }
+  function saveSecurity() {
+    const cur = $("secCur").value, nc = $("secNew").value, nc2 = $("secNew2").value, ap = $("secAp").value, pin = $("secPin").value.trim();
+    const msg = (t) => { $("secMsg").textContent = t; };
+    if (!cur) return msg("Isi kode akses saat ini.");
+    if (!nc && !ap && !pin) return msg("Isi minimal satu: kode akses baru, sandi WiFi, atau PIN Bluetooth.");
+    if (nc && !/^[\x21-\x7e]{4,12}$/.test(nc)) return msg(EV_TEXT.bad_newcode);
+    if (nc !== nc2) return msg("Konfirmasi kode akses baru tidak sama.");
+    if (ap && !/^[\x20-\x7e]{8,63}$/.test(ap)) return msg(EV_TEXT.bad_appass);
+    if (pin && !/^\d{6}$/.test(pin)) return msg(EV_TEXT.bad_btpin);
+    const cmd = { cmd: "security", code: cur };
+    if (nc) cmd.newcode = nc;
+    if (ap) cmd.appass = ap;
+    if (pin) cmd.btpin = pin;
+    if (!connected) { msg("Mode demo: sambungkan ke modul untuk menyimpan."); send(cmd); return; }
+    auth.pending = { newcode: nc, appass: !!ap, btpin: !!pin };
+    msg("Mengirim ke modul…");
+    send(cmd);
+  }
+  function syncSecurity() {
+    const tag = $("secTag");
+    if (!tag) return;
+    const st = !connected ? (demo ? "DEMO" : "OFFLINE") : auth.ok ? (auth.def ? "DEFAULT!" : "TERBUKA") : "TERKUNCI";
+    tag.textContent = st;
+    tag.dataset.s = !connected ? "" : auth.ok ? (auth.def ? "warn" : "ok") : "bad";
+    let w = "";
+    if (auth.boot) w = `⏳ Tombol BOOT ditahan ${auth.boot} dtk — lepas untuk batal, 8 dtk = reset kredensial.`;
+    else if (connected && auth.ok && auth.def) w = "⚠️ Modul masih memakai kredensial default. Ganti kode akses, sandi WiFi, dan PIN Bluetooth.";
+    else if (auth.lock) w = `🔒 Salah kode berkali-kali, coba lagi ${auth.lock} detik.`;
+    $("secWarn").textContent = w;
+    $("secLock").disabled = !connected || !auth.ok;
   }
 
   async function connectToggle() {
@@ -219,8 +329,10 @@
     try {
       setStatus("busy", "MENCARI");
       const name = await transport.connect(onDisconnect);
-      connected = true; rxBuf = "";
+      connected = true; rxBuf = ""; auth.ok = false; auth.def = false;
       setStatus("live", "TERHUBUNG");
+      if (auth.code) send({ cmd: "auth", code: auth.code });
+      else setTimeout(() => { if (connected && !auth.ok) showLock("Modul terhubung. Masukkan kode akses (default 1234)."); }, 600);
       $("connectText").textContent = "PUTUSKAN";
       say("Tersambung~! Halo modul RZM ♡", "happy", 2400);
       log(`Tersambung ke ${name} (${link === "wifi" ? "WiFi" : isNative ? "BLE aplikasi Android" : "Web Bluetooth"})`);
@@ -233,7 +345,8 @@
   }
   function onDisconnect() {
     if (!connected) return;
-    connected = false;
+    connected = false; auth.ok = false; auth.pending = null;
+    syncSecurity();
     $("connectText").textContent = "SAMBUNGKAN";
     setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
     log("Koneksi terputus.");
@@ -242,7 +355,15 @@
   function setStatus(s, text) { $("status").dataset.s = s; $("statusText").textContent = text; }
 
   /* ---------------- status dari modul ---------------- */
-  function applyStatus(m) {
+  function applyStatus(m, src = {}) {
+    // GET /api/status (HTTP polling) tidak punya sesi → abaikan "auth" dari sana.
+    const wasOk = auth.ok;
+    if (typeof m.auth === "boolean" && !src.poll) setAuthOk(m.auth);
+    if (typeof m.def === "boolean") auth.def = m.def;
+    auth.lock = typeof m.lock === "number" ? m.lock : 0;
+    auth.boot = typeof m.boot === "number" ? m.boot : 0;
+    // HTTP mengirim ulang auth di tiap perintah → "auth_ok" berulang tidak perlu diumumkan lagi.
+    if (typeof m.ev === "string" && m.ev && !(m.ev === "auth_ok" && wasOk)) onEvent(m.ev);
     for (const k of ["tank", "front", "rear", "pf", "pr"]) if (typeof m[k] === "number") state[k] = m[k];
     if (typeof m.speed === "number") state.speed = m.speed;
     if (typeof m.preset === "number") state.preset = clamp(m.preset, 0, 2);
@@ -540,6 +661,19 @@
       send({ cmd: "wifi", ssid: $("staSsid").value.trim(), pass: $("staPass").value });
       log("Pengaturan WiFi dikirim. Cek IP modul di kartu ESP32 / Serial Monitor.");
     };
+    $("lockForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const c = $("lockCode").value;
+      if (!c) { $("lockMsg").textContent = "Isi kode akses."; return; }
+      auth.remember = $("lockRemember").checked;
+      if (!auth.remember) localStorage.removeItem("rzm.code");
+      $("lockMsg").textContent = "Memeriksa…";
+      tryAuth(c);
+    });
+    $("lockLater").onclick = () => { hideLock(); log("Mode lihat saja: status tampil, perintah kontrol terkunci."); };
+    $("secSave").onclick = saveSecurity;
+    $("secLock").onclick = () => { send({ cmd: "logout" }); setAuthOk(false); };
+    $("secForget").onclick = () => { localStorage.removeItem("rzm.code"); auth.remember = false; if (!auth.ok) auth.code = ""; log("Kode akses yang diingat di HP ini dihapus."); };
     $("demoToggle").onclick = () => {
       demo = !demo; localStorage.setItem("rzm.demo", demo ? "1" : "0");
       $("demoToggle").textContent = "MODE DEMO: " + (demo ? "ON" : "OFF");
@@ -571,7 +705,7 @@
     setGauge("gRear", ui.rear, state.pr);
     drawCar(dt);
     drawHw();
-    if (now - lastInfo > 300) { syncControls(); drawInfo(); lastInfo = now; }
+    if (now - lastInfo > 300) { syncControls(); syncSecurity(); drawInfo(); lastInfo = now; }
     requestAnimationFrame(frame);
   }
 
@@ -607,5 +741,5 @@
       { sel: ".tp-btn", title: "4. Ganti tema", text: "Coba tema Neon, Cyber Merah, Terang, atau <b>Anime Sakura</b> ✿" },
     ]), 900);
   }
-  window.RZM = { state, send, applyStatus };   // untuk debug di konsol
+  window.RZM = { state, send, applyStatus, showLock, auth };   // untuk debug di konsol
 })();
