@@ -332,6 +332,9 @@ void applyWifiSta() {
 }
 
 void setupWifi() {
+  // setup() menutup prefs setelah membaca kalibrasi ("rzmcal"). Buka lagi namespace utama
+  // supaya savePrefs() (preset/auto/tema) dan setelan WiFi tetap tersimpan.
+  prefs.begin("rzm", false);
   staSsid = prefs.getString("ssid", "");
   staPass = prefs.getString("spass", "");
   apPass = prefs.getString("appass", AP_PASS_DEFAULT);
