@@ -273,9 +273,64 @@ Alternatif dengan GitHub CLI: `gh release create v0.2.0 file1 file2 --notes "...
 
 ---
 
-## 10. Checklist sebelum push
+## 10. Keamanan akses: kode akses, sandi WiFi, PIN Bluetooth
+
+Mulai firmware **0.3.0**, kontrol dilindungi tiga kredensial. Semuanya disimpan di NVS (Preferences) namespace **`rzmsec`**,
+terpisah dari kalibrasi (`rzmcal`) dan preset (`rzm`).
+
+| Kredensial | Default | Aturan | Konstanta di firmware |
+|---|---|---|---|
+| Kode akses UI/API | `1234` | 4–12 karakter ASCII, tanpa spasi | `ACCESS_CODE_DEFAULT` |
+| Sandi WiFi AP `RZMONG-AIR` | `rzmong123` | 8–63 karakter (WPA2) | `AP_PASS_DEFAULT` |
+| PIN Bluetooth (passkey BLE) | `123456` | tepat 6 angka | `BT_PIN_DEFAULT` |
+
+### Cara pakai
+1. Sambungkan lewat Bluetooth: HP akan minta **PIN pairing** → ketik `123456` (atau PIN barumu).
+   Lewat WiFi: masuk ke `RZMONG-AIR` dengan sandinya, buka `http://192.168.4.1/`.
+2. Setelah tersambung, muncul jendela **KODE AKSES**. Masukkan kode (default `1234`).
+   Centang **Ingat kode di HP ini** kalau tidak mau mengetik ulang (disimpan di `localStorage` kunci `rzm.code`; tombol
+   **LUPAKAN KODE DI HP INI** menghapusnya). Pilih **LIHAT SAJA** untuk memantau tanpa bisa mengontrol.
+3. Selama kredensial masih default, kartu **🔒 KEAMANAN** menampilkan tanda **DEFAULT!**.
+
+### Mengganti kredensial
+Halaman kontrol → kartu **🔒 KEAMANAN**:
+1. Isi **Kode akses saat ini** (selalu wajib, walau sudah login).
+2. Isi yang ingin diganti: kode akses baru (+ ulangi), sandi WiFi baru, dan/atau PIN Bluetooth baru. Kosongkan yang tidak diganti.
+3. Tekan **SIMPAN KE MODUL**. Hasil:
+   - Kode akses baru → HP lain yang sedang tersambung harus memasukkan kode baru.
+   - Sandi WiFi baru → WiFi `RZMONG-AIR` restart ±2 detik. Sambungkan ulang HP dengan sandi baru.
+   - PIN Bluetooth baru → semua pairing lama dihapus. Di HP: **Pengaturan → Bluetooth → RZM-AIR → Lupakan/Unpair**, lalu sambungkan lagi dan masukkan PIN baru.
+
+Perintah protokolnya (`auth`, `logout`, `security`) ada di `docs/PROTOKOL.md`.
+
+### Reset kredensial dengan tombol BOOT (lupa kode/PIN/sandi)
+1. Pastikan modul **sudah menyala normal** (layar bulat tampil). Jangan menahan BOOT sambil menyalakan, karena itu masuk mode flash/download.
+2. **Tahan tombol BOOT** di papan ESP32 DevKit (**GPIO0**) selama **8 detik**.
+   - LED biru bawaan (GPIO2) berkedip, makin lama makin cepat.
+   - Layar bulat menampilkan `TAHAN BOOT / RESET n s`. Serial Monitor (115200) menghitung mundur.
+   - Halaman kontrol yang tersambung menampilkan "Tombol BOOT ditahan n dtk".
+   - Lepas sebelum 8 detik = **batal**, tidak ada yang berubah.
+3. Setelah 8 detik: layar menampilkan `KREDENSIAL DIRESET`, LED berkedip cepat ±4 detik, dan Serial mencetak kredensial default.
+   Kode akses kembali `1234`, sandi WiFi `rzmong123`, PIN Bluetooth `123456`, dan semua pairing BLE dihapus.
+   **Tidak ikut direset:** kalibrasi sensor, preset, otomatis, tema, dan WiFi router (STA).
+4. Di HP: lupakan/unpair `RZM-AIR`, sambungkan ulang, lalu segera ganti kredensial default.
+
+Mengubah pin atau lama tahan: konstanta `PIN_BOOT` (0 untuk ESP32 klasik/esp32dev; **9** untuk ESP32-C3), `PIN_LED`, dan
+`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode: `AUTH_MAX_FAIL` (5) dan `AUTH_LOCK_MS` (30 dtk).
+
+### Catatan keamanan
+- Status JSON tidak pernah memuat kode, sandi, atau PIN. Log protokol di UI menyamarkannya (`••••`).
+- Tombol **STOP** (tutup semua katup) tetap diterima tanpa kode, demi keselamatan.
+- Kredensial disimpan apa adanya di flash ESP32. Orang yang memegang modul fisik bisa membaca flash atau menekan BOOT,
+  jadi pasang modul di tempat yang tidak mudah dijangkau.
+- WiFi lewat HTTP biasa (tanpa TLS); keamanannya bergantung pada sandi WPA2 `RZMONG-AIR`. BLE terenkripsi setelah pairing.
+
+---
+
+## 11. Checklist sebelum push
 
 - [ ] Tes di `localhost`, dan Console tidak menampilkan error
 - [ ] Jika sprite berubah: `python3 tools/pixel/gen_pix.py`
 - [ ] Jika `web/control` berubah: versi `sw.js` dinaikkan + `python3 tools/embed_web.py`
+- [ ] Jika firmware/`web/control` berubah: build `pio run -e esp32dev` lalu `./merge_bin.sh` (memperbarui `web/flash/firmware/*.bin`) dan naikkan `version` di `web/flash/firmware/manifest.json`
 - [ ] Tidak meng-commit file build (`node_modules/`, `www/`, `.pio/`, `*.apk`, `__pycache__/`); semuanya sudah ada di `.gitignore`

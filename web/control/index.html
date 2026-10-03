@@ -147,6 +147,37 @@
       </details>
     </section>
 
+    <!-- Keamanan: kode akses, sandi WiFi AP, PIN Bluetooth -->
+    <section class="card security" id="secCard" aria-label="Keamanan">
+      <div class="card-head"><span><span class="emo">🔒</span><i class="ico" data-ico="key"></i> KEAMANAN</span><span class="tag sec-tag" id="secTag">DEMO</span></div>
+      <p class="sec-warn" id="secWarn" role="status"></p>
+      <form class="sec-form" id="secForm" onsubmit="return false" autocomplete="off">
+        <label><span>Kode akses saat ini <em>wajib</em></span><input id="secCur" type="password" autocomplete="current-password" placeholder="••••" /></label>
+        <div class="sec-row">
+          <label><span>Kode akses baru</span><input id="secNew" type="password" autocomplete="new-password" placeholder="4–12 karakter" maxlength="12" /></label>
+          <label><span>Ulangi kode baru</span><input id="secNew2" type="password" autocomplete="new-password" placeholder="ulangi" maxlength="12" /></label>
+        </div>
+        <label><span>Sandi WiFi <code>RZMONG-AIR</code> baru</span><input id="secAp" type="password" autocomplete="new-password" placeholder="min. 8 karakter (WPA2)" maxlength="63" /></label>
+        <label><span>PIN Bluetooth baru</span><input id="secPin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="6 angka" /></label>
+        <p class="hint">Kosongkan yang tidak ingin diganti. Kode akses saat ini selalu diminta sebelum menyimpan.</p>
+        <div class="sec-actions">
+          <button type="button" class="btn neon" id="secSave"><span class="emo">💾</span> SIMPAN KE MODUL</button>
+          <button type="button" class="btn" id="secLock"><span class="emo">🔒</span> KUNCI SEKARANG</button>
+        </div>
+        <p class="sec-msg" id="secMsg" role="status"></p>
+      </form>
+      <details class="wifi-setup sec-help">
+        <summary><span class="emo">🆘</span> Lupa kode? Reset lewat tombol BOOT</summary>
+        <ol class="hint">
+          <li>Modul menyala normal (jangan tahan BOOT saat menyalakan — itu mode flash).</li>
+          <li>Tahan tombol <b>BOOT</b> (GPIO0) di papan ESP32 selama <b>8 detik</b>. LED biru berkedip makin cepat, layar bulat menghitung mundur.</li>
+          <li>Lepas sebelum 8 detik = batal. Setelah reset: kode akses <code>1234</code>, WiFi <code>rzmong123</code>, PIN Bluetooth <code>123456</code>.</li>
+          <li>Kalibrasi sensor, preset, dan WiFi router tidak berubah. Di HP, lupakan/unpair <code>RZM-AIR</code> lalu pairing ulang.</li>
+        </ol>
+        <button type="button" class="mini" id="secForget">LUPAKAN KODE DI HP INI</button>
+      </details>
+    </section>
+
     <!-- Diagram hardware yang bisa diketuk (fitur Grok) -->
     <section class="card hw" aria-label="Diagram hardware">
       <div class="card-head"><span><span class="emo">🧰</span><i class="ico" data-ico="esp"></i> KETUK HARDWARE</span><span class="tag">INTERAKTIF</span></div>
@@ -163,6 +194,22 @@
       <pre class="log" id="log"></pre>
     </section>
   </main>
+  <!-- Kunci: minta kode akses sebelum perintah kontrol -->
+  <div class="lock" id="lock" hidden role="dialog" aria-modal="true" aria-labelledby="lockTitle">
+    <form class="lock-card card" id="lockForm" autocomplete="off">
+      <div class="lock-ico" aria-hidden="true">🔒</div>
+      <h2 id="lockTitle">KODE AKSES</h2>
+      <p class="lock-sub">Modul RZM-AIR terkunci. Masukkan kode akses untuk naik/turun, preset, dan manual.</p>
+      <input id="lockCode" type="password" autocomplete="current-password" placeholder="••••" maxlength="12" aria-label="Kode akses" />
+      <label class="lock-rem"><input type="checkbox" id="lockRemember" /> Ingat kode di HP ini</label>
+      <p class="lock-msg" id="lockMsg" role="alert"></p>
+      <div class="lock-actions">
+        <button type="button" class="btn" id="lockLater">LIHAT SAJA</button>
+        <button type="submit" class="btn neon" id="lockGo"><span class="emo">🔓</span> BUKA KUNCI</button>
+      </div>
+      <small class="lock-foot">Default kode <code>1234</code> · PIN pairing Bluetooth <code>123456</code> · lupa? tahan BOOT 8 dtk</small>
+    </form>
+  </div>
   <footer class="foot">RZMONG Airsuspension · BLE <code>RZM-AIR</code> · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
   <script src="cars-pixel.js"></script>
   <script src="cars.js"></script>

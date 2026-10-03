@@ -178,3 +178,8 @@ html[data-theme="anime"] .cx-colors button{background:var(--sw);border-color:#ff
 /* mobil pixel art */
 .cx-pix{display:flex;justify-content:center;width:100%;overflow:hidden;border-radius:12px}
 .cx-pix canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:10px}
+/* keamanan & kunci di tema terang/anime */
+html[data-theme="terang"] .sec-form input,html[data-theme="anime"] .sec-form input,
+html[data-theme="terang"] .lock-card input[type=password],html[data-theme="anime"] .lock-card input[type=password]{background:#fff}
+html[data-theme="terang"] .lock,html[data-theme="anime"] .lock{background:rgba(240,235,250,.7)}
+html[data-theme="anime"] .lock-card h2{color:#e0558f;text-shadow:none}

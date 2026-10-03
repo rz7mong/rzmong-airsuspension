@@ -83,6 +83,7 @@ Tidak ada aplikasi toko. Pilihan:
 - `web/control/` di Chrome HP (PWA, bisa "Pasang aplikasi").
 - APK Android dari `android/` (Capacitor, BLE native) — unduh dari Releases atau artifact Actions.
 - WiFi tanpa internet: sambungkan HP ke `RZMONG-AIR` (sandi `rzmong123`), buka `http://192.168.4.1/`.
+- Kode akses default `1234`, PIN pairing Bluetooth `123456`. Ganti di kartu **🔒 KEAMANAN**. Lupa? Tahan BOOT 8 detik saat modul menyala (lihat README).
 
 Di atas halaman ada pemilih jalur **BLUETOOTH / WIFI**. Detail protokol di `docs/PROTOKOL.md`.
 

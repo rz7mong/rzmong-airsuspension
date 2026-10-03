@@ -168,3 +168,31 @@ html,body{overflow-x:clip}
 .car-custom summary{cursor:pointer;color:var(--dim);font-size:.8rem;letter-spacing:.08em;padding:6px 0}
 .card[hidden]{display:none!important}
 .mini.on{border-color:var(--ok);color:var(--ok)}
+
+/* keamanan: kode akses, sandi WiFi, PIN Bluetooth */
+.sec-tag[data-s="ok"]{color:var(--ok);border-color:var(--ok)}
+.sec-tag[data-s="warn"]{color:var(--warn);border-color:var(--warn);animation:pulse 1.2s infinite}
+.sec-tag[data-s="bad"]{color:var(--bad);border-color:var(--bad)}
+.sec-warn{margin:0 0 6px;color:var(--warn);font-size:.8rem;font-weight:600}
+.sec-warn:empty{display:none}
+.sec-form{display:grid;gap:8px}
+.sec-form label{display:grid;gap:4px;font-size:.72rem;letter-spacing:.08em;color:var(--dim)}
+.sec-form label em{font-style:normal;color:var(--accent2);margin-left:4px}
+.sec-form input,.lock-card input[type=password]{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--text);font-family:var(--mono);font-size:.95rem;outline:0;transition:.2s}
+.sec-form input:focus,.lock-card input[type=password]:focus{border-color:var(--accent);box-shadow:var(--glow)}
+.sec-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sec-actions{display:grid;grid-template-columns:1.4fr 1fr;gap:8px}
+.sec-actions .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.sec-msg{margin:0;min-height:1.1em;color:var(--accent);font-size:.8rem}
+.sec-help ol{padding-left:1.2em;margin:6px 0;line-height:1.45}
+.lock{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:18px;background:rgba(2,4,10,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.lock[hidden]{display:none}
+.lock-card{width:min(380px,100%);text-align:center;display:grid;gap:10px;padding:22px 18px}
+.lock-ico{font-size:2.4rem;filter:drop-shadow(0 0 12px var(--accent))}
+.lock-card h2{margin:0;letter-spacing:.3em;font-size:1.1rem;color:var(--accent);text-shadow:var(--glow)}
+.lock-sub{margin:0;color:var(--dim);font-size:.85rem}
+.lock-card input[type=password]{text-align:center;font-size:1.5rem;letter-spacing:.4em;padding:12px}
+.lock-rem{display:flex;gap:8px;justify-content:center;align-items:center;font-size:.8rem;color:var(--dim)}
+.lock-msg{margin:0;min-height:1.1em;color:var(--bad);font-weight:600;font-size:.82rem}
+.lock-actions{display:grid;grid-template-columns:1fr 1.4fr;gap:8px}
+.lock-foot{color:var(--dim);font-size:.68rem}
