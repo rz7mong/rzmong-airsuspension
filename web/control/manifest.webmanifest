@@ -1,0 +1,8 @@
+{
+  "name": "RZMON-G Air",
+  "short_name": "RZM Air",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#07101c",
+  "theme_color": "#07101c"
+}

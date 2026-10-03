@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07101c" />
+  <title>RZMON-G Control</title>
+  <style>
+    :root {
+      --bg: #07101c;
+      --panel: #101a2bcc;
+      --line: #2a4068;
+      --text: #e7f0ff;
+      --dim: #8ea0c0;
+      --accent: #3ee0ff;
+      --warn: #ff4d6a;
+    }
+    [data-theme="day"] { --accent: #d7e6ff; --bg: #121821; }
+    [data-theme="stance"] { --accent: #ff2a4a; --line: #5a2030; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background:
+        radial-gradient(900px 400px at 70% -10%, #16345e55, transparent 60%),
+        var(--bg);
+    }
+    header, main { width: min(980px, 94vw); margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: end; padding: 28px 0 12px; }
+    h1 { margin: 0; font-size: 1.05rem; letter-spacing: .22em; font-weight: 560; }
+    .sub { color: var(--dim); letter-spacing: .14em; font-size: .72rem; }
+    .gauges { display: grid; grid-template-columns: 1.3fr .7fr .7fr; gap: 14px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
+      padding: 16px; backdrop-filter: blur(8px);
+    }
+    .speedo { height: 280px; display: grid; place-items: center; position: relative; }
+    svg { width: min(280px, 70vw); height: auto; }
+    .readout { position: absolute; text-align: center; }
+    .readout b { display: block; font-size: 3rem; letter-spacing: -.04em; }
+    .readout span { color: var(--dim); letter-spacing: .18em; font-size: .72rem; }
+    .mini b { font-size: 2rem; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    button {
+      background: transparent; color: var(--text); border: 1px solid var(--line);
+      border-radius: 999px; padding: 10px 16px; letter-spacing: .08em; cursor: pointer;
+    }
+    button.active, button:hover { border-color: var(--accent); color: var(--accent); }
+    label { display: flex; justify-content: space-between; color: var(--dim); font-size: .85rem; margin-top: 12px; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .fault { color: var(--warn); min-height: 1.2em; letter-spacing: .08em; }
+    @media (max-width: 800px) { .gauges { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body data-theme="night">
+  <header>
+    <div>
+      <div class="sub">RZMON-G / 2 TITIK</div>
+      <h1>AIR CONTROL</h1>
+    </div>
+    <button id="connect">SAMBUNGKAN</button>
+  </header>
+  <main>
+    <section class="gauges">
+      <article class="card speedo">
+        <svg viewBox="0 0 200 200" id="arc"></svg>
+        <div class="readout"><b id="tank">0</b><span>TANGKI PSI</span></div>
+      </article>
+      <article class="card mini"><div class="readout" style="position:static"><b id="front">0</b><span>DEPAN</span></div></article>
+      <article class="card mini"><div class="readout" style="position:static"><b id="rear">0</b><span>BELAKANG</span></div></article>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <div class="row" id="presets">
+        <button data-id="0">PARKIR</button>
+        <button data-id="1" class="active">JALAN</button>
+        <button data-id="2">TINGGI</button>
+      </div>
+      <label>Depan <output id="frontOut">50</output></label>
+      <input id="frontRange" type="range" min="15" max="110" value="50" />
+      <label>Belakang <output id="rearOut">55</output></label>
+      <input id="rearRange" type="range" min="15" max="110" value="55" />
+      <div class="row">
+        <button id="rise">NAIK SAAT HIDUP</button>
+        <button id="drop">TURUN SAAT MATI</button>
+        <button data-theme="day">SIANG</button>
+        <button data-theme="night">MALAM</button>
+        <button data-theme="stance">STANCE</button>
+      </div>
+      <p class="fault" id="fault"></p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { tank: 128, front: 50, rear: 55, preset: 1, rise: true, drop: false, fault: "", demo: true };
+    const targets = [{f:25,r:25},{f:50,r:55},{f:75,r:80}];
+    let rxChar, txChar, device;
+
+    function draw() {
+      $("tank").textContent = Math.round(state.tank);
+      $("front").textContent = Math.round(state.front);
+      $("rear").textContent = Math.round(state.rear);
+      $("fault").textContent = state.fault || (state.demo ? "MODE DEMO" : "TERHUBUNG");
+      $("rise").classList.toggle("active", state.rise);
+      $("drop").classList.toggle("active", state.drop);
+      const p = Math.max(0, Math.min(1, state.tank / 200));
+      const a0 = -210 * Math.PI / 180, a1 = 30 * Math.PI / 180;
+      const ang = a0 + (a1 - a0) * p;
+      const arc = (to) => {
+        const x = 100 + 78 * Math.cos(to), y = 100 + 78 * Math.sin(to);
+        const large = to - a0 > Math.PI ? 1 : 0;
+        return `M ${100 + 78 * Math.cos(a0)} ${100 + 78 * Math.sin(a0)} A 78 78 0 ${large} 1 ${x} ${y}`;
+      };
+      $("arc").innerHTML = `<path d="${arc(a1)}" stroke="#24344f" stroke-width="8" fill="none"/>
+        <path d="${arc(ang)}" stroke="var(--accent)" stroke-width="8" fill="none" stroke-linecap="round"/>`;
+    }
+
+    function applyStatus(msg) {
+      Object.assign(state, msg);
+      state.demo = false;
+      $("frontRange").value = msg.pf ?? $("frontRange").value;
+      $("rearRange").value = msg.pr ?? $("rearRange").value;
+      $("frontOut").value = $("frontRange").value;
+      $("rearOut").value = $("rearRange").value;
+      document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("active", Number(b.dataset.id) === state.preset));
+      draw();
+    }
+
+    async function send(obj) {
+      if (!rxChar) return;
+      const data = new TextEncoder().encode(JSON.stringify(obj) + "\n");
+      await rxChar.writeValue(data);
+    }
+
+    $("connect").onclick = async () => {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ name: "RZM-AIR" }],
+        optionalServices: ["6e400001-b5a3-f393-e0a9-e50e24dcca9e"]
+      });
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+      rxChar = await service.getCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
+      txChar = await service.getCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+      await txChar.startNotifications();
+      txChar.addEventListener("characteristicvaluechanged", (ev) => {
+        const text = new TextDecoder().decode(ev.target.value);
+        text.split("\n").filter(Boolean).forEach((line) => applyStatus(JSON.parse(line)));
+      });
+    };
+
+    document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => {
+      state.preset = Number(b.dataset.id);
+      send({ cmd: "preset", id: state.preset });
+      draw();
+    });
+    $("frontRange").oninput = (e) => { $("frontOut").value = e.target.value; send({ cmd: "set", axle: "front", psi: Number(e.target.value) }); };
+    $("rearRange").oninput = (e) => { $("rearOut").value = e.target.value; send({ cmd: "set", axle: "rear", psi: Number(e.target.value) }); };
+    $("rise").onclick = () => { state.rise = !state.rise; send({ cmd: "auto", rise: state.rise, drop: state.drop }); draw(); };
+    $("drop").onclick = () => { state.drop = !state.drop; send({ cmd: "auto", rise: state.rise, drop: state.drop }); draw(); };
+    document.querySelectorAll("[data-theme]").forEach((b) => b.onclick = () => {
+      document.body.dataset.theme = b.dataset.theme;
+      const id = { day: 0, night: 1, stance: 2 }[b.dataset.theme];
+      send({ cmd: "theme", id });
+    });
+
+    setInterval(() => {
+      if (!state.demo) return;
+      const t = targets[state.preset];
+      state.front += (t.f - state.front) * 0.08;
+      state.rear += (t.r - state.rear) * 0.08;
+      state.tank = 150 + Math.sin(Date.now() / 700) * 8;
+      draw();
+    }, 80);
+    draw();
+  </script>
+</body>
+</html>

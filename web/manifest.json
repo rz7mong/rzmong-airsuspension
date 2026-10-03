@@ -1,0 +1,13 @@
+{
+  "name": "RZMON-G Air Suspension",
+  "version": "0.1.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware/rzmong.ino.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
