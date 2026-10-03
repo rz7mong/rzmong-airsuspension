@@ -6,29 +6,27 @@
   <title>RZMON-G Flash</title>
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-      background: radial-gradient(circle at 50% 0%, #1a2744, #07090f 60%);
-      color: #e8eefc; font-family: Inter, system-ui, sans-serif; }
-    main { width: min(560px, 92vw); padding: 28px; border: 1px solid #2a3d66; border-radius: 20px; background: #0d1424cc; }
-    h1 { font-weight: 560; letter-spacing: .08em; font-size: 1.2rem; }
-    p, li { color: #b7c4de; line-height: 1.5; }
-    code { color: #8fd0ff; }
-    esp-web-install-button { display: inline-block; margin-top: 12px; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center;
+      background:radial-gradient(circle at 50% 0%, #1a2744, #07090f 60%); color:#e8eefc;
+      font-family:Inter, system-ui, sans-serif; }
+    main { width:min(560px, 92vw); padding:28px; border:1px solid #2a3d66; border-radius:20px; background:#0d1424cc; }
+    h1 { letter-spacing:.08em; font-size:1.2rem; }
+    p, li { color:#b7c4de; line-height:1.5; }
+    code { color:#8fd0ff; }
   </style>
 </head>
 <body>
   <main>
-    <h1>RZMON-G FLASH</h1>
-    <p>Flash firmware kontroler 2 titik dari Chrome atau Edge. Kabel data USB, bukan kabel charge saja.</p>
+    <h1>⚡ RZMON-G FLASH</h1>
+    <p>🧩 Pasang firmware kontroler 2 titik dari Chrome atau Edge. Pakai kabel data USB.</p>
     <ol>
-      <li>Export compiled binary dari Arduino IDE.</li>
-      <li>Simpan sebagai <code>web/firmware/rzmong.ino.bin</code>.</li>
-      <li>Jalankan halaman ini lewat HTTP, lalu tekan pasang.</li>
-      <li>Kalau tidak terdeteksi, tahan BOOT saat menghubungkan.</li>
+      <li>🛠️ Export compiled binary dari Arduino IDE.</li>
+      <li>💾 Simpan sebagai <code>web/firmware/rzmong.ino.bin</code>.</li>
+      <li>🌐 Jalankan halaman ini lewat HTTP, lalu tekan pasang.</li>
+      <li>👢 Kalau tidak terdeteksi, tahan BOOT saat menghubungkan.</li>
     </ol>
     <esp-web-install-button manifest="../manifest.json"></esp-web-install-button>
-    <p>Setelah selesai, buka website kontrol dan sambungkan ke <code>RZM-AIR</code>.</p>
+    <p>✅ Setelah selesai, buka website kontrol dan sambungkan ke <code>RZM-AIR</code>.</p>
   </main>
 </body>
 </html>
