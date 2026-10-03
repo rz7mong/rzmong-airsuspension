@@ -1,4 +1,4 @@
-# Tutorial rakit RZMON-G Air Suspension
+# Tutorial rakit RZMONG Airsuspension
 
 Target: kontroler 2 titik, tampilan speedometer, tiga preset PSI, naik saat ACC hidup, turun saat ACC mati kalau menu otomatis dinyalakan, plus HP.
 
@@ -53,10 +53,13 @@ Urutan nyala pertama, solenoid belum dipasang ke udara:
 ## 4. Firmware
 
 1. Pasang board package ESP32 di Arduino IDE.
-2. Library: Adafruit ADS1X15, Adafruit GFX, Adafruit GC9A01A, Preferences.
+2. Library: Adafruit ADS1X15, Adafruit GFX, Adafruit GC9A01A, ArduinoJson 7, WebSockets (Markus Sattler). Preferences/WiFi/WebServer bawaan core ESP32.
 3. Buka `firmware/rzmong_airsuspension/rzmong_airsuspension.ino`.
-4. Board: ESP32 Dev Module. Flash size 4 MB. Upload speed 115200.
-5. Serial monitor 115200. Harus muncul `RZM-AIR ready`.
+4. Board: ESP32 Dev Module. Flash size 4 MB. **Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS)** — BLE + WiFi + UI web lebih dari 1,3 MB. Upload speed 115200.
+5. Serial monitor 115200. Harus muncul `WiFi AP RZMONG-AIR  IP 192.168.4.1` lalu `RZM-AIR ready`.
+
+Alternatif PlatformIO: `cd firmware && pio run -t upload` (lihat `firmware/platformio.ini`).
+Kalau `web/control` diubah, jalankan `python3 tools/embed_web.py` sebelum build agar UI di ESP32 ikut baru.
 
 Kalibrasi ada di atas sketsa: `PSI_MIN_V` 0,5 dan `PSI_MAX_V` 4,5 untuk sensor 200 psi. Deadband 2 psi. Timeout isi 90 detik. Batas kantung 15–110 psi.
 
@@ -64,7 +67,7 @@ Kalibrasi ada di atas sketsa: `PSI_MIN_V` 0,5 dan `PSI_MAX_V` 4,5 untuk sensor 2
 
 Halaman `web/flash/` memakai ESP Web Tools. Butuh Chrome atau Edge, dan file `.bin` hasil build.
 
-Build dari Arduino IDE: Sketch, Export compiled binary. Salin `.bin` ke `web/firmware/rzmong.ino.bin`, lalu buka halaman flash lewat server lokal, bukan `file://`.
+File `.bin` gabungan (bootloader + partisi + aplikasi, offset 0) ada di `web/flash/firmware/` dan dibangun ulang otomatis oleh GitHub Actions. Build manual: `cd firmware && pio run && ./merge_bin.sh`. Buka halaman flash lewat server lokal, bukan `file://`.
 
 ```bash
 cd web
@@ -75,7 +78,13 @@ Buka `http://localhost:8080/flash/`. Tahan BOOT saat menghubungkan kalau upload 
 
 ## 6. Aplikasi dan website kontrol
 
-Tidak ada aplikasi toko. Aplikasinya adalah `web/control/`, dibuka di Chrome HP. Tambahkan ke layar utama supaya jadi ikon.
+Tidak ada aplikasi toko. Pilihan:
+
+- `web/control/` di Chrome HP (PWA, bisa "Pasang aplikasi").
+- APK Android dari `android/` (Capacitor, BLE native) — unduh dari Releases atau artifact Actions.
+- WiFi tanpa internet: sambungkan HP ke `RZMONG-AIR` (sandi `rzmong123`), buka `http://192.168.4.1/`.
+
+Di atas halaman ada pemilih jalur **BLUETOOTH / WIFI**. Detail protokol di `docs/PROTOKOL.md`.
 
 - Mode demo berjalan tanpa modul.
 - Sambungkan mencari Bluetooth `RZM-AIR`.
@@ -93,10 +102,10 @@ Perintah yang dikirim HP berbentuk JSON, satu baris:
 {"cmd":"manual","axle":"front","action":"fill"}
 ```
 
-Modul membalas status sepuluh kali per detik:
+Modul membalas status empat kali per detik (BLE notify atau WebSocket `ws://192.168.4.1:81/`):
 
 ```json
-{"tank":140,"front":48,"rear":46,"preset":1,"comp":false,"rise":true,"drop":false,"fault":""}
+{"tank":140,"front":48,"rear":46,"preset":1,"comp":false,"rise":true,"drop":false,"theme":1,"pf":50,"pr":55,"fault":""}
 ```
 
 ## 7. Coba di mobil

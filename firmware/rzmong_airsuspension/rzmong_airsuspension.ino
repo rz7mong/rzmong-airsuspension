@@ -9,6 +9,11 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_GC9A01A.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <WebSocketsServer.h>  // library "WebSockets" oleh Markus Sattler (links2004)
+#include "web_assets.h"        // kontroler web (gzip), dibuat oleh tools/embed_web.py
 
 // Aktif-low untuk papan relay umum. Balik jika katup terbalik.
 #define RELAY_ON LOW
@@ -39,6 +44,13 @@
 #define RX_UUID "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define TX_UUID "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
+// WiFi: SoftAP selalu aktif, STA (router/hotspot) opsional lewat perintah {"cmd":"wifi",...}
+#define AP_SSID "RZMONG-AIR"
+#define AP_PASS_DEFAULT "rzmong123"
+#define MDNS_NAME "rzmong-air"
+#define HTTP_PORT 80
+#define WS_PORT 81
+
 Adafruit_ADS1115 ads;
 Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_RST);
 Preferences prefs;
@@ -59,6 +71,10 @@ bool fillingF = false, fillingR = false;
 uint32_t fillStartF = 0, fillStartR = 0;
 String fault = "";
 String rxLine;
+
+WebServer http(HTTP_PORT);
+WebSocketsServer ws(WS_PORT);
+String staSsid, staPass, apPass;
 
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
@@ -139,6 +155,9 @@ void applyAxle(float actual, int target, int fillPin, int dumpPin, bool &filling
   }
 }
 
+void buildStatus(JsonDocument &doc);
+void applyWifiSta();
+
 void handleLine(const String &line) {
   JsonDocument doc;
   if (deserializeJson(doc, line)) return;
@@ -168,6 +187,21 @@ void handleLine(const String &line) {
   } else if (!strcmp(cmd, "stop")) {
     allValvesOff();
     return;
+  } else if (!strcmp(cmd, "wifi")) {
+    // {"cmd":"wifi","ssid":"Router","pass":"rahasia"} → sambung ke router (STA). ssid kosong = matikan STA.
+    // {"cmd":"wifi","appass":"minimal8"} → ganti password SoftAP (berlaku setelah restart).
+    if (doc["ssid"].is<const char *>()) {
+      staSsid = (const char *)doc["ssid"];
+      staPass = doc["pass"] | "";
+      prefs.putString("ssid", staSsid);
+      prefs.putString("spass", staPass);
+      applyWifiSta();
+    }
+    if (doc["appass"].is<const char *>()) {
+      String p = (const char *)doc["appass"];
+      if (p.length() >= 8) { apPass = p; prefs.putString("appass", apPass); }
+    }
+    return;
   }
   savePrefs();
 }
@@ -182,6 +216,17 @@ void pollBle() {
   if (!bleConnected || millis() - last < 250) return;
   last = millis();
   JsonDocument doc;
+  buildStatus(doc);
+  char buf[220];
+  size_t len = serializeJson(doc, buf, sizeof(buf));
+  buf[len++] = '\n';
+  buf[len] = 0;
+  txChar->setValue((uint8_t *)buf, len);
+  txChar->notify();
+}
+
+// Status yang sama untuk BLE dan WiFi.
+void buildStatus(JsonDocument &doc) {
   doc["tank"] = round(tankPsi);
   doc["front"] = round(frontPsi);
   doc["rear"] = round(rearPsi);
@@ -193,12 +238,6 @@ void pollBle() {
   doc["pf"] = presets[activePreset].front;
   doc["pr"] = presets[activePreset].rear;
   doc["fault"] = fault;
-  char buf[220];
-  size_t len = serializeJson(doc, buf, sizeof(buf));
-  buf[len++] = '\n';
-  buf[len] = 0;
-  txChar->setValue((uint8_t *)buf, len);
-  txChar->notify();
 }
 
 void drawGauge(int cx, int cy, int r, float psi, float maxPsi, const char *label, uint16_t color) {
@@ -233,6 +272,110 @@ void drawDisplay() {
   }
 }
 
+// ---------- WiFi: HTTP REST + WebSocket, protokol sama dengan BLE ----------
+void handleLines(const String &text) {
+  int start = 0;
+  while (start < (int)text.length()) {
+    int n = text.indexOf('\n', start);
+    if (n < 0) n = text.length();
+    String line = text.substring(start, n);
+    line.trim();
+    if (line.length()) handleLine(line);
+    start = n + 1;
+  }
+}
+
+String wifiStatusJson() {
+  JsonDocument doc;
+  buildStatus(doc);
+  doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+  doc["sta"] = WiFi.status() == WL_CONNECTED;
+  doc["ble"] = bleConnected;
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+void sendCors() {
+  http.sendHeader("Access-Control-Allow-Origin", "*");
+  http.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  http.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  http.sendHeader("Access-Control-Allow-Private-Network", "true");
+}
+
+void serveAsset(const WebAsset &a) {
+  http.sendHeader("Content-Encoding", "gzip");
+  http.sendHeader("Cache-Control", "no-cache");
+  http.send_P(200, a.mime, (const char *)a.data, a.len);
+}
+
+void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
+  if (type == WStype_CONNECTED) {
+    String s = wifiStatusJson() + "\n";
+    ws.sendTXT(num, s);
+  } else if (type == WStype_TEXT) {
+    String text;
+    text.reserve(len);
+    for (size_t i = 0; i < len; i++) text += (char)payload[i];
+    handleLines(text);
+  }
+}
+
+void applyWifiSta() {
+  if (staSsid.length()) {
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
+  } else {
+    WiFi.disconnect();
+    WiFi.mode(WIFI_AP);
+  }
+}
+
+void setupWifi() {
+  // setup() menutup prefs setelah membaca kalibrasi ("rzmcal"). Buka lagi namespace utama
+  // supaya savePrefs() (preset/auto/tema) dan setelan WiFi tetap tersimpan.
+  prefs.begin("rzm", false);
+  staSsid = prefs.getString("ssid", "");
+  staPass = prefs.getString("spass", "");
+  apPass = prefs.getString("appass", AP_PASS_DEFAULT);
+  WiFi.mode(staSsid.length() ? WIFI_AP_STA : WIFI_AP);
+  WiFi.softAP(AP_SSID, apPass.c_str());
+  if (staSsid.length()) WiFi.begin(staSsid.c_str(), staPass.c_str());
+  MDNS.begin(MDNS_NAME);
+
+  http.on("/api/status", HTTP_GET, []() { sendCors(); http.send(200, "application/json", wifiStatusJson()); });
+  http.on("/api/cmd", HTTP_POST, []() {
+    sendCors();
+    handleLines(http.arg("plain"));
+    http.send(200, "application/json", wifiStatusJson());
+  });
+  http.on("/api/cmd", HTTP_OPTIONS, []() { sendCors(); http.send(204); });
+  http.on("/api/status", HTTP_OPTIONS, []() { sendCors(); http.send(204); });
+  http.on("/", HTTP_GET, []() { serveAsset(WEB_ASSETS[0]); });
+  http.onNotFound([]() {
+    String uri = http.uri();
+    for (size_t i = 0; i < WEB_ASSET_COUNT; i++)
+      if (uri == WEB_ASSETS[i].path) { serveAsset(WEB_ASSETS[i]); return; }
+    sendCors();
+    http.send(404, "text/plain", "tidak ada");
+  });
+  http.begin();
+  ws.begin();
+  ws.onEvent(wsEvent);
+  MDNS.addService("http", "tcp", HTTP_PORT);
+  Serial.printf("WiFi AP %s  IP %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+}
+
+void pollWifi() {
+  http.handleClient();
+  ws.loop();
+  static uint32_t last = 0;
+  if (ws.connectedClients() == 0 || millis() - last < 250) return;
+  last = millis();
+  String s = wifiStatusJson() + "\n";
+  ws.broadcastTXT(s);
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_FILL_F, OUTPUT);
@@ -255,7 +398,7 @@ void setup() {
 
   SPI.begin(18, -1, 23);
   displayOk = true;
-  tft.init(240, 240);
+  tft.begin();  // Adafruit_GC9A01A tidak punya init(w,h); layar 240x240 tetap
   tft.setRotation(0);
   tft.fillScreen(GC9A01A_BLACK);
 
@@ -269,6 +412,7 @@ void setup() {
   txChar->addDescriptor(new BLE2902());
   service->start();
   server->getAdvertising()->start();
+  setupWifi();
   Serial.println("RZM-AIR ready");
 }
 
@@ -290,6 +434,7 @@ void loop() {
   applyAxle(rearPsi, presets[activePreset].rear, PIN_FILL_R, PIN_DUMP_R, fillingR, fillStartR, "belakang");
 
   pollBle();
+  pollWifi();
   drawDisplay();
   delay(40);
 }

@@ -1,0 +1,51 @@
+name: Android APK
+
+on:
+  push:
+    paths: ["android/**", "web/control/**", ".github/workflows/android.yml"]
+    tags: ["v*"]
+  pull_request:
+    paths: ["android/**", "web/control/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: android/package-lock.json
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+      - name: Install & sync Capacitor
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../../rzmong-air-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rzmong-air-debug-apk
+          path: rzmong-air-debug.apk
+      - name: Lampirkan ke Release (tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rzmong-air-debug.apk

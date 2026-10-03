@@ -2,31 +2,188 @@
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RZMON-G Flash</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070d" />
+  <title>RZMONG Airsuspension — Flash Firmware</title>
+  <link rel="icon" href="../control/icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" href="../assets/neon.css" />
+  <link rel="stylesheet" href="../control/theme.css" />
+  <script src="../control/theme.js"></script>
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
-    body { margin:0; min-height:100vh; display:grid; place-items:center;
-      background:radial-gradient(circle at 50% 0%, #1a2744, #07090f 60%); color:#e8eefc;
-      font-family:Inter, system-ui, sans-serif; }
-    main { width:min(560px, 92vw); padding:28px; border:1px solid #2a3d66; border-radius:20px; background:#0d1424cc; }
-    h1 { letter-spacing:.08em; font-size:1.2rem; }
-    p, li { color:#b7c4de; line-height:1.5; }
-    code { color:#8fd0ff; }
+    .head{padding:40px 0 10px}
+    .head h1{font-size:clamp(1.8rem,6vw,3rem)}
+    .layout{display:grid;gap:16px;grid-template-columns:1fr;padding-bottom:30px}
+    .steps{display:grid;gap:12px;counter-reset:s;margin:0;padding:0}
+    .step{list-style:none;display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;padding:14px;border-radius:18px;border:1px solid var(--line);background:var(--glass);transition:.4s}
+    .step .n{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-family:var(--disp);border:1px solid var(--line);color:var(--dim)}
+    .step.active{border-color:var(--accent);box-shadow:var(--glow)}
+    .step.active .n{color:#001;background:linear-gradient(135deg,var(--accent),var(--accent2));border:0}
+    .step.done .n{color:var(--ok);border-color:var(--ok)}
+    .step.done .n::after{content:"✓"} .step.done .n span{display:none}
+    .step h3{font-size:.95rem;margin:0 0 4px}
+    .step p{margin:0;color:var(--dim)}
+    .chk{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .chk span{border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-size:.78rem}
+    .chk .ok{color:var(--ok);border-color:var(--ok)} .chk .bad{color:var(--bad);border-color:var(--bad)}
+    esp-web-install-button{display:inline-block;margin-top:10px}
+    .fw{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-family:var(--mono);font-size:.8rem;margin-top:10px}
+    .fw dt{color:var(--dim)} .fw dd{margin:0;word-break:break-all}
+    .term{display:flex;flex-direction:column;min-height:420px}
+    .term-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+    .term-bar .btn{padding:8px 12px;font-size:.75rem}
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 10px var(--bad)}
+    .dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok);animation:pulse 1.2s infinite}
+    @keyframes pulse{50%{opacity:.3}}
+    #serial{flex:1;margin:0;min-height:300px;max-height:60vh;overflow:auto;padding:12px;border-radius:14px;background:rgba(0,0,0,.45);border:1px solid var(--line);
+      font-family:var(--mono);font-size:.78rem;line-height:1.45;white-space:pre-wrap;word-break:break-all;color:#b9ffe4}
+    #serial .sys{color:var(--warn)} #serial .hi{color:var(--accent);font-weight:700;text-shadow:var(--glow)}
+    .scanline{position:relative;overflow:hidden}
+    .scanline::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 3px)}
+    @media (min-width:900px){.layout{grid-template-columns:1fr 1fr}}
   </style>
 </head>
 <body>
-  <main>
-    <h1>⚡ RZMON-G FLASH</h1>
-    <p>🧩 Pasang firmware kontroler 2 titik dari Chrome atau Edge. Pakai kabel data USB.</p>
-    <ol>
-      <li>🛠️ Export compiled binary dari Arduino IDE.</li>
-      <li>💾 Simpan sebagai <code>web/firmware/rzmong.ino.bin</code>.</li>
-      <li>🌐 Jalankan halaman ini lewat HTTP, lalu tekan pasang.</li>
-      <li>👢 Kalau tidak terdeteksi, tahan BOOT saat menghubungkan.</li>
-    </ol>
-    <esp-web-install-button manifest="../manifest.json"></esp-web-install-button>
-    <p>✅ Setelah selesai, buka website kontrol dan sambungkan ke <code>RZM-AIR</code>.</p>
+  <nav class="nav"><div class="wrap">
+    <a class="brand" href="../"><span class="logo">RZ</span>RZMONG Airsuspension</a>
+    <div class="nav-links"><a href="../">Beranda</a><a href="../control/">Kontroler</a><a class="on" href="./">Flash</a><span data-theme-picker></span></div>
+  </div></nav>
+
+  <header class="wrap head">
+    <div class="kicker">ESP WEB TOOLS · USB</div>
+    <h1>⚡ Flash <span class="grad">firmware</span></h1>
+    <p class="dim">Pasang firmware kontroler 2 titik langsung dari Chrome/Edge desktop. Tanpa Arduino IDE.</p>
+  </header>
+
+  <main class="wrap layout">
+    <section class="card">
+      <ol class="steps" id="steps">
+        <li class="step active" data-step="1"><div class="n"><span>01</span></div><div>
+          <h3>Cek browser &amp; kabel</h3>
+          <p>Butuh Chrome atau Edge desktop (Web Serial) dan kabel USB <b>data</b>, bukan kabel cas saja. Driver CP2102/CH340 harus terpasang.</p>
+          <div class="chk" id="checks"></div>
+        </div></li>
+        <li class="step" data-step="2"><div class="n"><span>02</span></div><div>
+          <h3>Colok ESP32</h3>
+          <p>Colok ESP32 DevKit ke laptop. Kalau port tidak muncul atau upload macet di "Connecting…", <b>tahan tombol BOOT</b> saat menyambung.</p>
+        </div></li>
+        <li class="step" data-step="3"><div class="n"><span>03</span></div><div>
+          <h3>Pasang firmware</h3>
+          <p>Tekan tombol di bawah, pilih port, centang <i>Erase</i> untuk pemasangan pertama. Tutup serial monitor dulu kalau sedang terbuka.</p>
+          <esp-web-install-button manifest="firmware/manifest.json" id="installBtn">
+            <button slot="activate" class="btn primary">🚀 PASANG FIRMWARE</button>
+            <span slot="unsupported" class="chk"><span class="bad">Browser ini tidak mendukung Web Serial — pakai Chrome/Edge desktop.</span></span>
+            <span slot="not-allowed" class="chk"><span class="bad">Butuh HTTPS atau localhost.</span></span>
+          </esp-web-install-button>
+          <dl class="fw" id="fwInfo"><dt>versi</dt><dd>memuat…</dd></dl>
+        </div></li>
+        <li class="step" data-step="4"><div class="n"><span>04</span></div><div>
+          <h3>Verifikasi</h3>
+          <p>Buka serial monitor (115200). Harus muncul <code>WiFi AP RZMONG-AIR</code> dan <code>RZM-AIR ready</code>. Lalu buka <a href="../control/">Kontroler</a> dan sambungkan lewat Bluetooth atau WiFi.</p>
+        </div></li>
+      </ol>
+    </section>
+
+    <section class="card term">
+      <div class="term-bar">
+        <span class="dot" id="dot"></span><b style="letter-spacing:.14em">SERIAL MONITOR</b>
+        <span style="flex:1"></span>
+        <select id="baud" class="btn" aria-label="Baud"><option>115200</option><option>9600</option><option>57600</option><option>230400</option></select>
+        <button class="btn" id="serConnect">🔌 SAMBUNG</button>
+        <button class="btn" id="serReset" disabled>↻ RESET</button>
+        <button class="btn" id="serClear">🧹</button>
+      </div>
+      <pre id="serial" class="scanline"></pre>
+    </section>
   </main>
+  <footer>Firmware dibangun otomatis oleh GitHub Actions dari <code>firmware/</code>. Build manual: <code>cd firmware &amp;&amp; pio run &amp;&amp; ./merge_bin.sh</code></footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const out = $("serial");
+    function line(text, cls) {
+      const s = document.createElement("span");
+      if (cls) s.className = cls;
+      s.textContent = text;
+      out.appendChild(s);
+      if (out.childNodes.length > 1500) out.firstChild.remove();
+      out.scrollTop = out.scrollHeight;
+    }
+    function setStep(n, doneUpTo = n - 1) {
+      document.querySelectorAll(".step").forEach((s) => {
+        const k = Number(s.dataset.step);
+        s.classList.toggle("done", k <= doneUpTo);
+        s.classList.toggle("active", k === n);
+      });
+    }
+    // 1. cek browser
+    const serialOk = "serial" in navigator, secure = window.isSecureContext;
+    const chromium = !!(navigator.userAgentData && navigator.userAgentData.brands.some((b) => /Chrom|Edge/i.test(b.brand)));
+    $("checks").innerHTML = [
+      [serialOk, "Web Serial"], [secure, "HTTPS/localhost"], [chromium, "Chrome/Edge"],
+    ].map(([ok, t]) => `<span class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✗"} ${t}</span>`).join("");
+    if (serialOk && secure) setStep(2, 1);
+    line(serialOk ? "Web Serial tersedia. Tekan SAMBUNG untuk melihat log ESP32.\n" : "Web Serial tidak tersedia di browser ini.\n", "sys");
+
+    // info firmware
+    fetch("firmware/manifest.json").then((r) => r.json()).then(async (m) => {
+      const part = m.builds[0].parts[0];
+      let size = "?";
+      try { const h = await fetch("firmware/" + part.path, { method: "HEAD" }); if (h.ok) size = (Number(h.headers.get("content-length")) / 1024).toFixed(0) + " KB"; else size = "belum ada (.bin dibangun GitHub Actions)"; } catch (e) { /* abaikan */ }
+      $("fwInfo").innerHTML = `<dt>versi</dt><dd>${m.version}</dd><dt>chip</dt><dd>${m.builds[0].chipFamily}</dd><dt>file</dt><dd>${part.path} @ 0x${part.offset.toString(16)}</dd><dt>ukuran</dt><dd>${size}</dd>`;
+    }).catch(() => { $("fwInfo").innerHTML = "<dt>manifest</dt><dd>gagal dimuat</dd>"; });
+    $("installBtn").addEventListener("click", () => setStep(3, 2));
+
+    // serial monitor
+    let port = null, reader = null, keep = false;
+    async function serialConnect() {
+      if (port) { await serialClose(); return; }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: Number($("baud").value) });
+      } catch (e) { line("Gagal membuka port: " + e.message + "\n", "sys"); port = null; return; }
+      $("dot").classList.add("on"); $("serConnect").textContent = "⏏ PUTUS"; $("serReset").disabled = false;
+      line(`— terhubung @ ${$("baud").value} baud —\n`, "sys");
+      keep = true;
+      const dec = new TextDecoder(); let buf = "";
+      while (port && port.readable && keep) {
+        reader = port.readable.getReader();
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let i;
+            while ((i = buf.indexOf("\n")) >= 0) {
+              const l = buf.slice(0, i + 1); buf = buf.slice(i + 1);
+              const hi = /RZM-AIR ready|WiFi AP/.test(l);
+              line(l, hi ? "hi" : "");
+              if (/RZM-AIR ready/.test(l)) { setStep(5, 4); if (window.RZMTheme) RZMTheme.mascot.say("Firmware jalan~! Yatta! 🎉", "happy", 2600); }
+            }
+          }
+        } catch (e) { line("\n— " + e.message + " —\n", "sys"); break; }
+        finally { reader.releaseLock(); reader = null; }
+      }
+    }
+    async function serialClose() {
+      keep = false;
+      try { if (reader) await reader.cancel(); } catch (e) { /* abaikan */ }
+      try { if (port) await port.close(); } catch (e) { /* abaikan */ }
+      port = null;
+      $("dot").classList.remove("on"); $("serConnect").textContent = "🔌 SAMBUNG"; $("serReset").disabled = true;
+      line("— terputus —\n", "sys");
+    }
+    $("serConnect").onclick = () => { if (!serialOk) { line("Web Serial tidak tersedia.\n", "sys"); return; } serialConnect(); };
+    $("serClear").onclick = () => { out.textContent = ""; };
+    $("serReset").onclick = async () => {
+      if (!port) return;
+      // EN lewat RTS (DevKit standar): tarik RTS sebentar untuk reboot tanpa masuk bootloader.
+      await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 120));
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      line("— reset —\n", "sys");
+    };
+  </script>
 </body>
 </html>
