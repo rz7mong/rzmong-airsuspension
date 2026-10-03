@@ -11,16 +11,24 @@ Sistem ini mengontrol tekanan, bukan tinggi mobil. Depan kiri dan kanan satu sal
 - `docs/TUTORIAL.md` — cara rakit dari nol
 - `docs/WIRING.md` — pin dan jalur udara
 - `firmware/` — sketsa Arduino ESP32
-- `web/flash/` — halaman flash lewat browser
-- `web/control/` — website kontrol, juga dipakai sebagai aplikasi HP
-- `web/manifest.json` — manifes firmware untuk ESP Web Tools
+- `docs/PROTOKOL.md` — protokol BLE & WiFi (perintah, status, endpoint)
+- `web/index.html` — landing page
+- `web/flash/` — halaman flash lewat browser (ESP Web Tools + serial monitor), `.bin` di `web/flash/firmware/`
+- `web/control/` — website kontrol (PWA), BLE atau WiFi, juga dibungkus jadi aplikasi Android
+- `android/` — proyek Capacitor (BLE native + WiFi) → APK debug dari GitHub Actions
+- `tools/embed_web.py` — bundel `web/control` ke firmware supaya ESP32 bisa menyajikan UI lewat WiFi
+- `.github/workflows/` — build firmware, APK Android, dan deploy GitHub Pages
 
 ## Jalur cepat
 
 1. Rakit hardware sesuai `docs/WIRING.md`.
-2. Buka `firmware/rzmong_airsuspension/rzmong_airsuspension.ino` di Arduino IDE, pilih board ESP32 Dev Module, flash.
-3. Atau bangun file `.bin`, taruh di `web/firmware/`, lalu buka halaman flash.
-4. Buka `web/control/index.html` di Chrome HP atau laptop. Sambungkan Bluetooth `RZM-AIR`.
+2. Paling gampang: buka halaman flash (`web/flash/`) di Chrome/Edge desktop, tekan Pasang.
+   Atau Arduino IDE: board ESP32 Dev Module, **Partition Scheme: Huge APP (3MB No OTA)**, flash.
+   Atau PlatformIO: `cd firmware && pio run -t upload`.
+3. Kontrol lewat salah satu:
+   - Bluetooth: buka `web/control/` di Chrome HP/laptop, pilih BLUETOOTH, sambungkan `RZM-AIR`.
+   - WiFi: sambungkan HP ke WiFi `RZMONG-AIR` (sandi `rzmong123`), buka `http://192.168.4.1/`.
+   - Aplikasi Android: unduh APK dari Releases/Actions, pilih Bluetooth atau WiFi.
 
 Halaman kontrol punya mode demo, jadi tampilan bisa dicoba tanpa modul.
 

@@ -7,7 +7,7 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "flash/firmware/rzmong-airsuspension-esp32-merged.bin",
+          "path": "rzmong-airsuspension-esp32-merged.bin",
           "offset": 0
         }
       ]

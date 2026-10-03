@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modul ESP32 hanya bicara HTTP/WebSocket polos (tanpa TLS).
+     192.168.4.1 = SoftAP RZMONG-AIR; rzmong-air.local = mDNS saat mode STA.
+     base-config cleartext diizinkan karena IP mode STA (router/hotspot) bisa berapa saja. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.4.1</domain>
+        <domain includeSubdomains="false">rzmong-air.local</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

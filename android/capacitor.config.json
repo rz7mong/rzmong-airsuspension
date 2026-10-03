@@ -1,0 +1,22 @@
+{
+  "appId": "com.rz7mong.airsuspension",
+  "appName": "RZMON-G Air",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Mencari RZM-AIR...",
+        "cancel": "Batal",
+        "availableDevices": "Perangkat tersedia",
+        "noDeviceFound": "Modul tidak ditemukan"
+      }
+    }
+  }
+}

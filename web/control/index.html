@@ -2,192 +2,160 @@
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#07101c" />
-  <title>RZMON-G Control</title>
-  <style>
-    :root { --bg:#07101c; --panel:#101a2bcc; --line:#2a4068; --text:#e7f0ff; --dim:#8ea0c0; --accent:#3ee0ff; --warn:#ff4d6a; }
-    [data-theme="day"] { --accent:#d7e6ff; --bg:#121821; }
-    [data-theme="stance"] { --accent:#ff2a4a; --line:#5a2030; }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, sans-serif;
-      background:radial-gradient(900px 400px at 70% -10%, #16345e55, transparent 60%), var(--bg); }
-    header, main { width:min(980px, 94vw); margin:0 auto; }
-    header { display:flex; justify-content:space-between; align-items:end; padding:28px 0 12px; gap:12px; }
-    h1 { margin:0; font-size:1.05rem; letter-spacing:.22em; font-weight:560; }
-    .sub { color:var(--dim); letter-spacing:.14em; font-size:.72rem; }
-    .grid { display:grid; grid-template-columns:1.15fr .85fr; gap:14px; }
-    .card { background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:16px; backdrop-filter:blur(8px); }
-    .speedo { height:250px; display:grid; place-items:center; position:relative; }
-    .readout { position:absolute; text-align:center; }
-    .readout b { display:block; font-size:3rem; letter-spacing:-.04em; }
-    .readout span { color:var(--dim); letter-spacing:.16em; font-size:.72rem; }
-    .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
-    button, .chip { background:transparent; color:var(--text); border:1px solid var(--line); border-radius:999px; padding:10px 16px; letter-spacing:.04em; cursor:pointer; }
-    button.active, button:hover, .chip.on { border-color:var(--accent); color:var(--accent); }
-    label { display:flex; justify-content:space-between; color:var(--dim); font-size:.85rem; margin-top:12px; }
-    input[type="range"] { width:100%; accent-color:var(--accent); }
-    .fault { color:var(--warn); min-height:1.2em; }
-    .log { font-size:.85rem; color:var(--dim); min-height:3.2em; line-height:1.45; }
-    svg { width:100%; height:auto; }
-    .hit { cursor:pointer; }
-    @media (max-width:800px) { .grid { grid-template-columns:1fr; } }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070d" />
+  <meta name="description" content="Kontroler suspensi udara 2 titik RZMON-G lewat Bluetooth." />
+  <title>RZMON-G // Air Control</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="control.css" />
 </head>
 <body data-theme="night">
-  <header>
-    <div>
-      <div class="sub">💨 RZMON-G / 2 TITIK</div>
-      <h1>AIR CONTROL</h1>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="../" title="Beranda">
+      <span class="logo">RZ</span>
+      <span><small>RZMON-G // 2 TITIK</small><b>AIR CONTROL</b></span>
+    </a>
+    <div class="top-actions">
+      <span class="pill" id="status" data-s="demo"><i></i><span id="statusText">DEMO</span></span>
+      <button class="btn neon" id="connect">📡 <span id="connectText">SAMBUNGKAN</span></button>
     </div>
-    <button id="connect">📡 SAMBUNGKAN</button>
   </header>
-  <main>
-    <section class="grid">
-      <article class="card speedo">
-        <svg id="arc" viewBox="0 0 200 200" width="250" height="250"></svg>
-        <div class="readout"><b id="tank">0</b><span>🛢️ TANGKI PSI</span></div>
-      </article>
-      <article class="card">
-        <div class="sub">🚗 MOBIL MENGIKUTI PSI</div>
-        <svg id="car" viewBox="0 0 360 190"></svg>
-        <div class="row">
-          <button id="up">⬆️ NAIK</button>
-          <button id="down">⬇️ TURUN</button>
-          <button id="stop">⏹️ STOP</button>
+  <div class="linkbar" id="linkbar">
+    <div class="seg" role="tablist" aria-label="Jalur koneksi">
+      <button role="tab" data-link="ble" id="linkBle">🔵 BLUETOOTH</button>
+      <button role="tab" data-link="wifi" id="linkWifi">📶 WIFI</button>
+    </div>
+    <label class="wifi-host" id="wifiHostBox" hidden>
+      <span>IP / host</span>
+      <input id="wifiHost" inputmode="url" autocomplete="off" spellcheck="false" value="192.168.4.1" />
+    </label>
+    <small class="link-hint" id="linkHint"></small>
+  </div>
+
+  <main class="layout">
+    <!-- HUD utama -->
+    <section class="card hud" aria-label="HUD">
+      <div class="card-head"><span>🛰️ HUD</span><span class="tag" id="accTag">SPEEDO</span></div>
+      <div class="hud-wrap">
+        <svg id="speedo" viewBox="0 0 240 240" role="img" aria-label="Speedometer dan tangki"></svg>
+        <div class="hud-read">
+          <b id="speedVal">0</b><span>KM/J</span>
+          <em id="speedNote"></em>
         </div>
-      </article>
+      </div>
+      <div class="tankbar">
+        <div class="tank-l">🛢️ TANGKI</div>
+        <div class="bar"><i id="tankFill"></i><s style="left:72.5%"></s><s style="left:82.5%"></s></div>
+        <div class="tank-v"><b id="tankVal">0</b> psi</div>
+        <div class="comp" id="comp">⚙️ KOMPRESOR <span>MATI</span></div>
+      </div>
     </section>
-    <section class="grid" style="margin-top:14px">
-      <article class="card">
-        <div class="row" id="presets">
-          <button data-id="0">🅿️ PARKIR</button>
-          <button data-id="1" class="active">🛣️ JALAN</button>
-          <button data-id="2">⛰️ TINGGI</button>
+
+    <!-- Gauge PSI 2 titik -->
+    <section class="card axles" aria-label="Tekanan balon">
+      <div class="card-head"><span>💨 TEKANAN 2 TITIK</span><span class="tag" id="presetTag">JALAN</span></div>
+      <div class="gauges">
+        <div class="gauge" data-axle="front">
+          <svg id="gFront" viewBox="0 0 160 160"></svg>
+          <div class="g-read"><b id="frontVal">0</b><span>DEPAN</span><em>target <i id="pfVal">–</i></em></div>
+          <div class="g-state" id="frontState">STABIL</div>
         </div>
-        <label>🔵 Depan <output id="frontOut">50</output> psi</label>
+        <div class="gauge" data-axle="rear">
+          <svg id="gRear" viewBox="0 0 160 160"></svg>
+          <div class="g-read"><b id="rearVal">0</b><span>BELAKANG</span><em>target <i id="prVal">–</i></em></div>
+          <div class="g-state" id="rearState">STABIL</div>
+        </div>
+      </div>
+      <p class="fault" id="fault" role="alert"></p>
+    </section>
+
+    <!-- Mobil mengikuti PSI (ilustrasi Grok, dipercantik) -->
+    <section class="card carcard" aria-label="Ilustrasi mobil">
+      <div class="card-head"><span>🚗 MOBIL MENGIKUTI PSI</span><span class="tag">LIVE</span></div>
+      <svg id="car" viewBox="0 0 380 190" role="img" aria-label="Mobil naik turun sesuai tekanan"></svg>
+    </section>
+
+    <!-- Preset & target -->
+    <section class="card presets" aria-label="Preset">
+      <div class="card-head"><span>🎚️ PRESET</span><span class="tag">TERSIMPAN DI MODUL</span></div>
+      <div class="preset-row" id="presets">
+        <button class="preset" data-id="0"><span>🅿️</span><b>PARKIR</b><small data-v="0">25/25</small></button>
+        <button class="preset" data-id="1"><span>🛣️</span><b>JALAN</b><small data-v="1">50/55</small></button>
+        <button class="preset" data-id="2"><span>⛰️</span><b>TINGGI</b><small data-v="2">75/80</small></button>
+      </div>
+      <div class="slider">
+        <label for="frontRange">🔵 Target depan <output id="frontOut">50</output> psi</label>
         <input id="frontRange" type="range" min="15" max="110" value="50" />
-        <label>🟣 Belakang <output id="rearOut">55</output> psi</label>
+      </div>
+      <div class="slider rear">
+        <label for="rearRange">🟣 Target belakang <output id="rearOut">55</output> psi</label>
         <input id="rearRange" type="range" min="15" max="110" value="55" />
-        <div class="row">
-          <button id="rise">🔑 NAIK SAAT HIDUP</button>
-          <button id="drop">🌙 TURUN SAAT MATI</button>
-          <button data-theme="day">☀️ SIANG</button>
-          <button data-theme="night">🌙 MALAM</button>
-          <button data-theme="stance">🔥 STANCE</button>
+      </div>
+      <p class="hint">Geser untuk mengubah preset aktif. Batas aman firmware 15–110 psi.</p>
+    </section>
+
+    <!-- Manual -->
+    <section class="card manual" aria-label="Manual">
+      <div class="card-head"><span>🕹️ MANUAL</span><span class="tag">TAHAN TOMBOL</span></div>
+      <div class="man-grid">
+        <div class="man-col">
+          <small>DEPAN</small>
+          <button class="hold up" data-axle="front" data-action="fill">▲<span>ISI</span></button>
+          <button class="hold down" data-axle="front" data-action="dump">▼<span>BUANG</span></button>
         </div>
-        <p class="fault" id="fault"></p>
-        <p class="log" id="log">Ketuk bagian hardware untuk lihat fungsinya. Mode demo jalan tanpa modul.</p>
-      </article>
-      <article class="card">
-        <div class="sub">🧰 KETUK HARDWARE</div>
-        <svg id="hw" viewBox="0 0 360 230"></svg>
-        <div class="row" id="chips"></div>
-      </article>
+        <div class="man-mid">
+          <button class="btn" id="allUp">⬆️ SEMUA NAIK<small>preset Tinggi</small></button>
+          <button class="btn" id="allDown">⬇️ SEMUA TURUN<small>preset Parkir</small></button>
+          <button class="btn danger" id="stop">⏹️ STOP</button>
+        </div>
+        <div class="man-col">
+          <small>BELAKANG</small>
+          <button class="hold up" data-axle="rear" data-action="fill">▲<span>ISI</span></button>
+          <button class="hold down" data-axle="rear" data-action="dump">▼<span>BUANG</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Otomatis & tema -->
+    <section class="card auto" aria-label="Otomatis">
+      <div class="card-head"><span>🔑 OTOMATIS & TEMA</span></div>
+      <button class="toggle" id="rise"><span class="sw"></span><b>Naik saat kontak hidup</b><small>ACC ON → preset Jalan</small></button>
+      <button class="toggle" id="drop"><span class="sw"></span><b>Turun saat kontak mati</b><small>ACC OFF → preset Parkir</small></button>
+      <div class="themes" id="themes">
+        <button data-theme="day" data-id="0">☀️ SIANG</button>
+        <button data-theme="night" data-id="1">🌙 MALAM</button>
+        <button data-theme="stance" data-id="2">🔥 STANCE</button>
+      </div>
+      <p class="hint">Tema dikirim ke layar bulat GC9A01 di modul.</p>
+      <details class="wifi-setup">
+        <summary>📶 WiFi modul (opsional)</summary>
+        <p class="hint">Modul selalu memancarkan WiFi <code>RZMONG-AIR</code> (192.168.4.1). Isi di bawah agar modul juga ikut router/hotspot (mode STA). Kosongkan SSID untuk mematikan STA.</p>
+        <input id="staSsid" placeholder="SSID router / hotspot" autocomplete="off" />
+        <input id="staPass" type="password" placeholder="Password" autocomplete="off" />
+        <button class="btn" id="staSave">💾 KIRIM KE MODUL</button>
+      </details>
+    </section>
+
+    <!-- Diagram hardware yang bisa diketuk (fitur Grok) -->
+    <section class="card hw" aria-label="Diagram hardware">
+      <div class="card-head"><span>🧰 KETUK HARDWARE</span><span class="tag">INTERAKTIF</span></div>
+      <svg id="hw" viewBox="0 0 360 240" role="img" aria-label="Diagram jalur udara"></svg>
+      <div class="chips" id="chips"></div>
+      <div class="info" id="info"></div>
+    </section>
+
+    <!-- Log protokol -->
+    <section class="card logcard" aria-label="Log">
+      <div class="card-head"><span>🧾 LOG PROTOKOL</span>
+        <span><button class="mini" id="demoToggle">MODE DEMO: ON</button> <button class="mini" id="install" hidden>⤓ PASANG APP</button></span>
+      </div>
+      <pre class="log" id="log"></pre>
     </section>
   </main>
-  <script>
-    const $ = (id) => document.getElementById(id);
-    const parts = {
-      pump: ["⚙️ Kompresor", "Mengisi tangki. Hidup di bawah 145 psi, mati di 165 psi. Jangan lewat relay kecil."],
-      tank: ["🛢️ Tangki", "Penyimpan udara. Sensor tangki membaca psi yang tampil di speedo."],
-      esp: ["🎛️ ESP32", "Otak modul. Membaca sensor, menggerakkan solenoid, dan bicara ke HP lewat Bluetooth RZM-AIR."],
-      valve: ["🔧 Solenoid", "Empat katup: isi/buang depan dan isi/buang belakang. Normally closed."],
-      front: ["🔵 Depan", "Dua balon satu saluran. Sensor hanya satu angka. Bocor di satu balon mengempiskan keduanya."],
-      rear: ["🟣 Belakang", "Sama seperti depan, saluran terpisah. Preset menyimpan psi depan dan belakang sendiri."]
-    };
-    const state = { tank:128, front:50, rear:55, preset:1, rise:true, drop:false, fault:"", demo:true, comp:false, part:"esp" };
-    const targets = [{f:25,r:25},{f:50,r:55},{f:75,r:80}];
-    let rxChar;
-
-    function drawArc() {
-      const p = Math.max(0, Math.min(1, state.tank / 200));
-      const a0 = -210 * Math.PI / 180, a1 = 30 * Math.PI / 180, ang = a0 + (a1 - a0) * p;
-      const arc = (to) => {
-        const x = 100 + 78 * Math.cos(to), y = 100 + 78 * Math.sin(to);
-        return `M ${100+78*Math.cos(a0)} ${100+78*Math.sin(a0)} A 78 78 0 ${to-a0>Math.PI?1:0} 1 ${x} ${y}`;
-      };
-      $("arc").innerHTML = `<path d="${arc(a1)}" stroke="#24344f" stroke-width="8" fill="none"/>
-        <path d="${arc(ang)}" stroke="var(--accent)" stroke-width="8" fill="none" stroke-linecap="round"/>`;
-    }
-    function drawCar() {
-      const lift = (psi) => 22 - (psi - 15) / 95 * 30;
-      const yf = lift(state.front), yr = lift(state.rear), body = 78 + Math.min(yf, yr);
-      $("car").innerHTML = `
-        <rect x="46" y="${body}" width="260" height="34" rx="16" fill="#16345e" stroke="var(--accent)"/>
-        <path d="M96 ${body} l28-26 h88 l26 26" fill="#0d2240" stroke="var(--accent)"/>
-        <circle cx="112" cy="${132+yf}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
-        <circle cx="248" cy="${132+yr}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
-        <text x="78" y="${172+yf}" fill="#8fd0ff" font-size="12">🔵 ${Math.round(state.front)}</text>
-        <text x="214" y="${172+yr}" fill="#d7b3ff" font-size="12">🟣 ${Math.round(state.rear)}</text>`;
-    }
-    function bag(cx, color, psi) {
-      const h = 18 + psi / 110 * 22;
-      return `<ellipse class="hit" data-part="${color==='#8fd0ff'?'front':'rear'}" cx="${cx}" cy="${168-h/2}" rx="24" ry="${h/2}" fill="#10233f" stroke="${color}" stroke-width="3"/>`;
-    }
-    function drawHw() {
-      const flow = state.comp ? "#3ee0ff" : "#355074";
-      $("hw").innerHTML = `
-        <g class="hit" data-part="pump"><rect x="16" y="28" width="78" height="48" rx="10" fill="#10233f" stroke="${state.comp?'var(--accent)':'#8ea0c0'}"/><text x="30" y="56" fill="#e7f0ff" font-size="13">⚙️ pompa</text></g>
-        <g class="hit" data-part="tank"><rect x="124" y="20" width="50" height="72" rx="10" fill="#10233f" stroke="var(--accent)"/><text x="136" y="62" font-size="18">🛢️</text></g>
-        <g class="hit" data-part="esp"><rect x="206" y="34" width="70" height="42" rx="10" fill="#10233f" stroke="#8fd0ff"/><text x="220" y="60" fill="#8fd0ff" font-size="13">🎛️ ESP</text></g>
-        <g class="hit" data-part="valve"><rect x="292" y="36" width="52" height="38" rx="8" fill="#10233f" stroke="#ffb45e"/><text x="304" y="60" font-size="14">🔧</text></g>
-        <path d="M94 52 H124 M174 56 H206 M258 56 H292" stroke="${flow}" fill="none" stroke-width="3"/>
-        ${bag(70,'#8fd0ff',state.front)}${bag(140,'#8fd0ff',state.front)}
-        ${bag(230,'#d7b3ff',state.rear)}${bag(300,'#d7b3ff',state.rear)}
-        <path d="M150 92 V120 M250 92 V120" stroke="${flow}" fill="none"/>
-        <text x="54" y="214" fill="#8fd0ff" font-size="11">depan</text>
-        <text x="214" y="214" fill="#d7b3ff" font-size="11">belakang</text>`;
-      $("hw").querySelectorAll(".hit").forEach((el) => el.onclick = () => { state.part = el.dataset.part; paint(); });
-    }
-    function paint() {
-      $("tank").textContent = Math.round(state.tank);
-      $("frontOut").value = Math.round($("frontRange").value);
-      $("rearOut").value = Math.round($("rearRange").value);
-      $("fault").textContent = state.fault ? "⚠️ " + state.fault : "";
-      $("rise").classList.toggle("active", state.rise);
-      $("drop").classList.toggle("active", state.drop);
-      document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("active", Number(b.dataset.id) === state.preset));
-      const [title, text] = parts[state.part];
-      $("log").textContent = title + " — " + text;
-      $("chips").innerHTML = Object.entries(parts).map(([k,v]) => `<button class="chip ${k===state.part?'on':''}" data-part="${k}">${v[0].split(' ')[0]}</button>`).join("");
-      $("chips").querySelectorAll(".chip").forEach((b) => b.onclick = () => { state.part = b.dataset.part; paint(); });
-      drawArc(); drawCar(); drawHw();
-    }
-    async function send(obj) {
-      if (!rxChar) return;
-      await rxChar.writeValue(new TextEncoder().encode(JSON.stringify(obj) + "\n"));
-    }
-    $("connect").onclick = async () => {
-      const device = await navigator.bluetooth.requestDevice({ filters:[{name:"RZM-AIR"}], optionalServices:["6e400001-b5a3-f393-e0a9-e50e24dcca9e"] });
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
-      rxChar = await service.getCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
-      const tx = await service.getCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
-      await tx.startNotifications();
-      tx.addEventListener("characteristicvaluechanged", (ev) => {
-        new TextDecoder().decode(ev.target.value).split("\n").filter(Boolean).forEach((line) => { Object.assign(state, JSON.parse(line)); state.demo = false; paint(); });
-      });
-    };
-    document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => { state.preset = Number(b.dataset.id); send({cmd:"preset", id:state.preset}); paint(); });
-    $("frontRange").oninput = (e) => { state.front = Number(e.target.value); send({cmd:"set", axle:"front", psi:state.front}); paint(); };
-    $("rearRange").oninput = (e) => { state.rear = Number(e.target.value); send({cmd:"set", axle:"rear", psi:state.rear}); paint(); };
-    $("rise").onclick = () => { state.rise = !state.rise; send({cmd:"auto", rise:state.rise, drop:state.drop}); paint(); };
-    $("drop").onclick = () => { state.drop = !state.drop; send({cmd:"auto", rise:state.rise, drop:state.drop}); paint(); };
-    $("up").onclick = () => { state.preset = 2; send({cmd:"preset", id:2}); paint(); };
-    $("down").onclick = () => { state.preset = 0; send({cmd:"preset", id:0}); paint(); };
-    $("stop").onclick = () => send({cmd:"stop"});
-    document.querySelectorAll("[data-theme]").forEach((b) => b.onclick = () => { document.body.dataset.theme = b.dataset.theme; send({cmd:"theme", id:{day:0,night:1,stance:2}[b.dataset.theme]}); paint(); });
-    setInterval(() => {
-      if (!state.demo) return;
-      const t = targets[state.preset];
-      state.front += (t.f - state.front) * 0.08;
-      state.rear += (t.r - state.rear) * 0.08;
-      state.comp = state.tank < 145;
-      state.tank = 150 + Math.sin(Date.now()/700) * 8;
-      paint();
-    }, 80);
-    paint();
-  </script>
+  <footer class="foot">RZMON-G Air Suspension · BLE <code>RZM-AIR</code> · <a href="../flash/">⚡ Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
+  <script src="app.js"></script>
 </body>
 </html>
