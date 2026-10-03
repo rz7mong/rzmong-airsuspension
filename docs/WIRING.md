@@ -22,7 +22,16 @@ ADS1115: A0 tangki, A1 depan, A2 belakang. ADDR ke GND, alamat 0x48.
 
 ## ACC
 
-Jangan masukkan 12 V langsung ke GPIO. Pakai pembagi 47k dari ACC ke GPIO 34, dan 22k dari GPIO 34 ke ground. Di titik tengah harus di bawah 3,3 V saat kontak hidup. GPIO 34 tidak punya pull-up internal.
+Jangan masukkan 12 V langsung ke GPIO. Pakai pembagi **100k dari ACC ke GPIO 34, dan 27k dari GPIO 34 ke ground**.
+Saat mesin hidup tegangan aki bisa 14,4 V (lonjakan lebih tinggi), jadi titik tengah harus tetap di bawah 3,3 V:
+14,4 V → 3,06 V, 12 V → 2,55 V. Ambang firmware (`analogRead > 2500`, ±2,1 V) setara ±10 V di ACC.
+Tambahkan kapasitor 100 nF dari GPIO 34 ke ground, dan idealnya dioda zener 3,3 V paralel untuk meredam lonjakan.
+GPIO 34 tidak punya pull-up internal.
+
+> Catatan: pembagi lama 47k/22k memberi 3,8 V di 12 V dan 4,6 V di 14,4 V — melebihi batas GPIO ESP32 (3,6 V). Ganti resistornya.
+
+Firmware mengabaikan perubahan ACC yang lebih singkat dari 0,5 detik (`ACC_DEBOUNCE_MS`), jadi tegangan drop saat starter
+tidak memicu "turun otomatis".
 
 ## Relay katup
 
@@ -42,4 +51,6 @@ Jangan menjalankan kompresor dari USB.
 
 ## Sensor
 
-Merah 5 V, hitam ground, kuning ke A0/A1/A2. Ulir 1/8 NPT di port manifold atau di T saluran, bukan di dalam balon. Seal pita secukupnya. Jangan sampai serpihan masuk katup.
+Merah 5 V, hitam ground, kuning ke A0/A1/A2. ADS1115 tidak boleh menerima tegangan input di atas VDD+0,3 V:
+kalau ADS1115 diberi 3,3 V, sinyal sensor 0,5–4,5 V harus lewat pembagi, atau beri ADS1115 VDD 5 V (cek modul I2C-nya aman
+untuk ESP32). Sinyal di luar 0,25–4,75 V dianggap sensor putus/korslet dan katup as itu tidak dijalankan. Ulir 1/8 NPT di port manifold atau di T saluran, bukan di dalam balon. Seal pita secukupnya. Jangan sampai serpihan masuk katup.

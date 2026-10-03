@@ -36,7 +36,7 @@ a = ap.parse_args()
 
 BAG_MIN, BAG_MAX, DEADBAND, TANK_ON, TANK_OFF = 15, 110, 2, 145, 165
 S = {"tank": 158.0, "front": 32.0, "rear": 30.0, "preset": 1, "comp": False, "rise": True, "drop": False, "theme": 1,
-     "fault": a.fault, "acc": True}
+     "fault": a.fault, "acc": True, "hold": False}
 presets = [[25, 25], [50, 55], [75, 80]]
 lock = threading.Lock()
 auth = {"fails": 0, "lock_until": 0.0}
@@ -50,7 +50,8 @@ def status():
     with lock:
         d = {"tank": round(S["tank"]), "front": round(S["front"]), "rear": round(S["rear"]), "preset": S["preset"],
              "comp": S["comp"], "rise": S["rise"], "drop": S["drop"], "theme": S["theme"], "pf": presets[S["preset"]][0],
-             "pr": presets[S["preset"]][1], "fault": S["fault"], "acc": S["acc"], "rm": 3}
+             "pr": presets[S["preset"]][1], "fault": S["fault"] or ("STOP: pilih preset" if S["hold"] else ""), "acc": S["acc"], "rm": 3}
+        if S["hold"]: d["hold"] = True   # firmware ≥0.3.1: STOP menahan leveling sampai preset/target dipilih
     lock_left = auth["lock_until"] - time.time()
     if lock_left > 0:
         d["lock"] = int(lock_left) + 1
@@ -67,10 +68,10 @@ def handle_line(d):
     c = d.get("cmd")
     with lock:
         if c == "preset":
-            S["preset"] = max(0, min(2, int(d.get("id", 1)))); S["fault"] = ""
+            S["preset"] = max(0, min(2, int(d.get("id", 1)))); S["fault"] = ""; S["hold"] = False
         elif c == "set":
             ax = 0 if d.get("axle", "front") == "front" else 1
-            presets[S["preset"]][ax] = max(BAG_MIN, min(BAG_MAX, int(d.get("psi", 40))))
+            presets[S["preset"]][ax] = max(BAG_MIN, min(BAG_MAX, int(d.get("psi", 40)))); S["hold"] = False
         elif c == "auto":
             S["rise"] = bool(d.get("rise", S["rise"])); S["drop"] = bool(d.get("drop", S["drop"]))
         elif c == "theme":
@@ -79,6 +80,7 @@ def handle_line(d):
             pass  # hanya action=stop yang sampai sini
         elif c == "stop":
             for k in valves: valves[k] = False
+            S["hold"] = True
     return None
 
 
@@ -145,8 +147,8 @@ try:
         with lock:  # fisika sederhana sama seperti mode demo UI
             for ax, key in (("front", "F"), ("rear", "R")):
                 tgt = presets[S["preset"]][0 if ax == "front" else 1]
-                fill = S[ax] < tgt - DEADBAND and S["tank"] > S[ax] + 5
-                dump = S[ax] > tgt + DEADBAND
+                fill = not S["hold"] and S[ax] < tgt - DEADBAND and S["tank"] > S[ax] + 5
+                dump = not S["hold"] and S[ax] > tgt + DEADBAND
                 if fill: S[ax] += 0.45; S["tank"] -= 0.12
                 if dump: S[ax] -= 0.6
                 valves["fill" + key], valves["dump" + key] = fill, dump

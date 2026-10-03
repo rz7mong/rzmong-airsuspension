@@ -20,6 +20,8 @@
 #include <PubSubClient.h>      // library "PubSubClient" oleh Nick O'Leary (knolleary)
 #include <mbedtls/md.h>
 #include "remote_ca.h"         // root CA untuk MQTT TLS
+#include <mutex>
+#include <atomic>
 
 // Aktif-low untuk papan relay umum. Balik jika katup terbalik.
 #define RELAY_ON LOW
@@ -40,7 +42,17 @@
 #define PSI_MAX_V 4.5f
 #define PSI_RANGE 200.0f
 #define DEADBAND 2.0f
-#define FILL_TIMEOUT_MS 90000
+#define FILL_TIMEOUT_MS 90000   // isi lebih lama dari ini tanpa sampai target → "bocor", katup as dikunci tutup
+#define DUMP_TIMEOUT_MS 90000   // buang lebih lama dari ini → "buang macet", katup as dikunci tutup
+#define MANUAL_MAX_MS 20000     // tombol manual ▲/▼: katup menutup sendiri kalau pesan "stop" tidak datang
+#define COMP_MAX_MS 600000UL    // kompresor nyala terus >10 menit tanpa tangki penuh → dimatikan (tangki/selang bocor?)
+#define ACC_DEBOUNCE_MS 500     // ACC harus stabil sekian lama (abaikan tegangan drop saat starter)
+#define SENSOR_V_MIN 0.25f      // sensor 0,5–4,5 V: di luar rentang ini = kabel putus / korslet
+#define SENSOR_V_MAX 4.75f
+#define SENSOR_BAD_READS 3      // baca salah berturut-turut sebelum sensor dianggap rusak
+#define SENSOR_GOOD_READS 5     // baca benar berturut-turut sebelum sensor dipercaya lagi
+#define ADS_TIMEOUT_MS 30       // batas tunggu satu konversi ADS1115 (normal ±8 ms)
+#define ADS_RETRY_MS 2000       // coba sambung ulang ADS1115 tiap 2 detik kalau hilang
 #define BAG_MIN 15
 #define BAG_MAX 110
 #define TANK_ON 145
@@ -87,7 +99,7 @@ Adafruit_ADS1115 ads;
 Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_RST);
 Preferences prefs;
 BLECharacteristic *txChar;
-bool bleConnected = false;
+std::atomic<bool> bleConnected{false};
 bool displayOk = false;
 
 struct Preset { int front; int rear; };
@@ -98,11 +110,39 @@ bool dropOnStop = false;
 int theme = 1;
 
 float tankPsi = 0, frontPsi = 0, rearPsi = 0;
-bool accOn = false, accWas = false;
-bool fillingF = false, fillingR = false;
-uint32_t fillStartF = 0, fillStartR = 0;
+bool accOn = false;
 String fault = "";
-String rxLine;
+
+// Sensor tekanan: 0 tangki, 1 depan, 2 belakang. Katup/kompresor hanya dikendalikan kalau sensornya valid.
+bool adsOk = false;
+uint32_t adsRetryAt = 0;
+bool sensorOk[3] = {false, false, false};
+uint8_t sensorBad[3] = {0, 0, 0}, sensorGood[3] = {0, 0, 0};
+
+// STOP: leveling otomatis berhenti sampai pengguna memilih preset / mengubah target (atau ACC otomatis).
+bool levelHold = false;
+bool compRunning = false, compFault = false;
+uint32_t compStart = 0;
+
+enum ManualAct : uint8_t { MAN_NONE = 0, MAN_FILL = 1, MAN_DUMP = 2 };
+struct Axle {
+  const char *name;
+  int fillPin, dumpPin;
+  bool filling, dumping;
+  uint32_t started;
+  const char *latched;   // "bocor" / "buang macet" → katup as ini dikunci tutup sampai preset dipilih lagi
+  uint8_t manual;        // ManualAct
+  uint32_t manualAt;
+  uint8_t manualBy;      // pemilik perintah manual: 0 BLE, 1..8 WebSocket, 254 remote, 255 HTTP
+};
+Axle axF = {"depan", PIN_FILL_F, PIN_DUMP_F, false, false, 0, nullptr, MAN_NONE, 0, 0};
+Axle axR = {"belakang", PIN_FILL_R, PIN_DUMP_R, false, false, 0, nullptr, MAN_NONE, 0, 0};
+
+// BLE: callback jalan di task Bluetooth (core 0), loop() di core 1 → buffer bersama dilindungi mutex.
+std::mutex bleMx;
+String bleRxShared;            // ditulis callback BLE (pegang bleMx)
+bool bleConnEvt = false;       // ada connect/disconnect yang belum diproses loop() (pegang bleMx)
+String rxLine;                 // hanya dipakai loop()
 
 WebServer http(HTTP_PORT);
 WebSocketsServer ws(WS_PORT);
@@ -120,25 +160,34 @@ uint32_t resetNoticeUntil = 0;   // tampilkan "KREDENSIAL DIRESET" di layar samp
 
 // Satu sesi per koneksi: BLE (satu HP), tiap klien WebSocket, dan tiap request HTTP.
 struct Session { bool authed; const char *ev; bool info; };  // info → kirim id remote sekali
-Session bleSession = {false, nullptr};
+Session bleSession = {false, nullptr, false};
 #define WS_SLOTS 8
 Session wsSession[WS_SLOTS];
+Session rmSession = {true, nullptr, false};   // perintah remote internet (sudah lolos HMAC per pesan)
 
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
     String v = c->getValue().c_str();
-    rxLine += v;
+    std::lock_guard<std::mutex> g(bleMx);
+    if (bleRxShared.length() + v.length() > 1024) bleRxShared = "";  // loop() tertinggal jauh → buang
+    bleRxShared += v;
   }
 };
 
 class ServerCb : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
+    std::lock_guard<std::mutex> g(bleMx);
     bleConnected = true;
-    bleSession = {false, nullptr};
+    bleRxShared = "";
+    bleConnEvt = true;   // sesi direset di loop(), bukan di task BLE
   }
   void onDisconnect(BLEServer *s) override {
-    bleConnected = false;
-    bleSession = {false, nullptr};
+    {
+      std::lock_guard<std::mutex> g(bleMx);
+      bleConnected = false;
+      bleRxShared = "";
+      bleConnEvt = true;
+    }
     s->startAdvertising();
   }
 };
@@ -164,6 +213,11 @@ Cal cal[3] = {
   {0.50f, 4.50f, 200.0f, false}
 };
 
+uint32_t deadlineIn(uint32_t ms) {  // 0 berarti "tidak aktif", jadi hindari hasil 0 saat millis() meluap
+  uint32_t t = millis() + ms;
+  return t ? t : 1;
+}
+
 float voltsToPsi(uint8_t ch, int16_t raw) {
   float v = raw * 0.0001875f;
   float span = cal[ch].vRef - cal[ch].v0;
@@ -173,6 +227,50 @@ float voltsToPsi(uint8_t ch, int16_t raw) {
 }
 
 void setValve(int pin, bool on) { digitalWrite(pin, on ? RELAY_ON : RELAY_OFF); }
+
+// Baca satu kanal ADS1115 dengan batas waktu. readADC_SingleEnded() bawaan library menunggu tanpa batas,
+// sehingga modul lepas / kabel I2C putus membuat loop() macet dengan katup di posisi terakhir.
+bool readAdc(uint8_t ch, int16_t &raw) {
+  ads.startADCReading(MUX_BY_CHANNEL[ch], false);
+  uint32_t t0 = millis();
+  while (!ads.conversionComplete()) {
+    if (millis() - t0 > ADS_TIMEOUT_MS) return false;
+    delay(1);
+  }
+  raw = ads.getLastConversionResults();
+  return true;
+}
+
+void readSensors() {
+  if (!adsOk && (int32_t)(millis() - adsRetryAt) >= 0) {
+    adsOk = ads.begin();
+    if (adsOk) { ads.setGain(GAIN_TWOTHIRDS); Serial.println("ADS1115 tersambung"); }
+    else adsRetryAt = deadlineIn(ADS_RETRY_MS);
+  }
+  float *psi[3] = {&tankPsi, &frontPsi, &rearPsi};
+  for (uint8_t ch = 0; ch < 3; ch++) {
+    int16_t raw = 0;
+    bool read = adsOk && readAdc(ch, raw);
+    if (adsOk && !read) {
+      adsOk = false;
+      adsRetryAt = deadlineIn(ADS_RETRY_MS);
+      Serial.println("ADS1115 tidak menjawab — semua katup & kompresor dimatikan");
+    }
+    float v = raw * 0.0001875f;
+    bool inRange = read && v >= SENSOR_V_MIN && v <= SENSOR_V_MAX;
+    if (!read) {
+      sensorOk[ch] = false; sensorGood[ch] = 0; sensorBad[ch] = SENSOR_BAD_READS;
+    } else if (!inRange) {
+      sensorGood[ch] = 0;
+      if (sensorBad[ch] < SENSOR_BAD_READS && ++sensorBad[ch] >= SENSOR_BAD_READS) sensorOk[ch] = false;
+    } else {
+      sensorBad[ch] = 0;
+      if (!sensorOk[ch] && ++sensorGood[ch] >= SENSOR_GOOD_READS) sensorOk[ch] = true;
+    }
+    if (inRange) *psi[ch] = voltsToPsi(ch, raw);   // nilai di luar rentang tidak dipakai (tetap nilai terakhir)
+    else if (!sensorOk[ch]) *psi[ch] = 0;
+  }
+}
 
 void allValvesOff() {
   setValve(PIN_FILL_F, false);
@@ -192,33 +290,87 @@ void savePrefs() {
 void loadPrefs() {
   prefs.begin("rzm", false);
   if (prefs.isKey("presets")) prefs.getBytes("presets", presets, sizeof(presets));
-  activePreset = prefs.getInt("preset", 1);
+  activePreset = constrain(prefs.getInt("preset", 1), 0, 2);   // NVS rusak tidak boleh jadi indeks di luar presets[]
   riseOnStart = prefs.getBool("rise", true);
   dropOnStop = prefs.getBool("drop", false);
-  theme = prefs.getInt("theme", 1);
+  theme = constrain(prefs.getInt("theme", 1), 0, 2);
+  for (Preset &p : presets) { p.front = constrain(p.front, BAG_MIN, BAG_MAX); p.rear = constrain(p.rear, BAG_MIN, BAG_MAX); }
 }
 
-void applyAxle(float actual, int target, int fillPin, int dumpPin, bool &filling, uint32_t &started, const char *name) {
-  target = constrain(target, BAG_MIN, BAG_MAX);
-  if (actual < target - DEADBAND) {
-    setValve(dumpPin, false);
-    setValve(fillPin, true);
-    if (!filling) { filling = true; started = millis(); }
-    if (millis() - started > FILL_TIMEOUT_MS) {
-      setValve(fillPin, false);
-      filling = false;
-      fault = String(name) + " bocor";
-    }
-  } else if (actual > target + DEADBAND) {
-    setValve(fillPin, false);
-    setValve(dumpPin, true);
-    filling = false;
+// Satu as: manual (selama tombol ditahan) > leveling otomatis. Katup isi & buang tidak pernah terbuka bersamaan.
+void applyAxle(Axle &a, float actual, bool ok, int target) {
+  uint32_t now = millis();
+  bool fill = false, dump = false;
+  if (a.manual) {
+    bool expired = now - a.manualAt > MANUAL_MAX_MS;
+    bool limit = ok && ((a.manual == MAN_FILL && actual >= BAG_MAX) || (a.manual == MAN_DUMP && actual <= BAG_MIN));
+    if (expired || limit) a.manual = MAN_NONE;
+    else { fill = a.manual == MAN_FILL; dump = a.manual == MAN_DUMP; }
+    a.filling = a.dumping = false;
+  } else if (ok && !levelHold && !a.latched) {
+    target = constrain(target, BAG_MIN, BAG_MAX);
+    fill = actual < target - DEADBAND;
+    dump = actual > target + DEADBAND;
+    if (fill) {
+      if (!a.filling) { a.filling = true; a.started = now; }
+      else if (now - a.started > FILL_TIMEOUT_MS) { a.latched = "bocor"; fill = false; }
+    } else a.filling = false;
+    if (dump) {
+      if (!a.dumping) { a.dumping = true; a.started = now; }
+      else if (now - a.started > DUMP_TIMEOUT_MS) { a.latched = "buang macet"; dump = false; }
+    } else a.dumping = false;
+    if (a.latched) { a.filling = a.dumping = false; Serial.printf("Katup %s dikunci tutup: %s\n", a.name, a.latched); }
   } else {
-    setValve(fillPin, false);
-    setValve(dumpPin, false);
-    filling = false;
-    if (fault.startsWith(name)) fault = "";
+    a.filling = a.dumping = false;
   }
+  // Tutup dulu yang harus mati, baru buka yang lain.
+  if (!fill) setValve(a.fillPin, false);
+  if (!dump) setValve(a.dumpPin, false);
+  if (fill) setValve(a.fillPin, true);
+  if (dump) setValve(a.dumpPin, true);
+}
+
+void cancelManual(uint8_t owner = 0xff, bool all = true) {
+  Axle *ax[2] = {&axF, &axR};
+  for (Axle *a : ax)
+    if (a->manual && (all || a->manualBy == owner)) { a->manual = MAN_NONE; setValve(a->fillPin, false); setValve(a->dumpPin, false); }
+}
+
+void controlCompressor() {
+  bool want = compRunning;
+  if (tankPsi < TANK_ON) want = true;
+  if (tankPsi > TANK_OFF) want = false;
+  if (!sensorOk[0] || compFault) want = false;
+  uint32_t now = millis();
+  if (want && !compRunning) compStart = now;
+  if (want && compRunning && now - compStart > COMP_MAX_MS) {
+    compFault = true;
+    want = false;
+    Serial.println("Kompresor >10 menit tanpa tangki penuh — dimatikan (cek kebocoran)");
+  }
+  compRunning = want;
+  setValve(PIN_COMP, want);
+}
+
+// Teks fault untuk status/layar, urut dari yang paling penting.
+void updateFault() {
+  String f;
+  if (!adsOk) f = "sensor ADS1115";
+  else if (!sensorOk[0] && sensorBad[0] >= SENSOR_BAD_READS) f = "sensor tangki";
+  else if (!sensorOk[1] && sensorBad[1] >= SENSOR_BAD_READS) f = "sensor depan";
+  else if (!sensorOk[2] && sensorBad[2] >= SENSOR_BAD_READS) f = "sensor belakang";
+  else if (axF.latched) f = String("depan ") + axF.latched;
+  else if (axR.latched) f = String("belakang ") + axR.latched;
+  else if (compFault) f = "kompresor >10 mnt";
+  else if (levelHold) f = "STOP: pilih preset";
+  fault = f;
+}
+
+// Preset dipilih / target diubah → lanjutkan leveling dan buka kunci fault (coba lagi).
+void resumeLeveling() {
+  levelHold = false;
+  axF.latched = axR.latched = nullptr;
+  compFault = false;
 }
 
 void buildStatus(JsonDocument &doc, Session *s = nullptr);
@@ -308,8 +460,8 @@ void factoryResetCredentials() {
   clearBleBonds();
   logoutAll();
   remoteDisableAfterReset();  // remote internet dimatikan (kode kembali 1234 → tidak aman dibiarkan online)
-  apRestartAt = millis() + 500;
-  resetNoticeUntil = millis() + 4000;
+  apRestartAt = deadlineIn(500);
+  resetNoticeUntil = deadlineIn(4000);
   bleSession.ev = "reset";
   for (int i = 0; i < WS_SLOTS; i++) wsSession[i].ev = "reset";
   Serial.println("=== KREDENSIAL DIRESET KE DEFAULT ===");
@@ -330,8 +482,7 @@ bool checkCode(const char *code, Session &s) {
   if (sameSecret(accessCode, code)) { authFails = 0; return true; }
   if (++authFails >= AUTH_MAX_FAIL) {
     authFails = 0;
-    authLockUntil = millis() + AUTH_LOCK_MS;
-    if (!authLockUntil) authLockUntil = 1;
+    authLockUntil = deadlineIn(AUTH_LOCK_MS);
     s.ev = "locked";
     Serial.println("Akses: terlalu banyak kode salah, dikunci 30 detik");
   } else s.ev = "bad_code";
@@ -364,7 +515,7 @@ void handleSecurity(JsonDocument &doc, Session &s) {
   if (newAp.length()) {
     apPass = newAp;
     secPrefs.putString("appass", apPass);
-    apRestartAt = millis() + 2000;  // beri waktu balasan terkirim sebelum WiFi AP restart
+    apRestartAt = deadlineIn(2000);  // beri waktu balasan terkirim sebelum WiFi AP restart
     Serial.println("Akses: sandi WiFi AP diganti, AP restart 2 detik lagi");
   }
   if (pinStr.length()) {
@@ -375,6 +526,13 @@ void handleSecurity(JsonDocument &doc, Session &s) {
     Serial.println("Akses: PIN Bluetooth diganti, pairing lama dihapus");
   }
   s.ev = "saved";
+}
+
+uint8_t sessionOwner(const Session &s) {
+  if (&s == &bleSession) return 0;
+  if (&s >= wsSession && &s < wsSession + WS_SLOTS) return 1 + (&s - wsSession);
+  if (&s == &rmSession) return 254;  // remote internet (isi/buang manual ditolak di rmHandle)
+  return 255;  // HTTP (tanpa koneksi tetap) → hanya dibatasi MANUAL_MAX_MS
 }
 
 void handleLine(const String &line, Session &s) {
@@ -400,27 +558,37 @@ void handleLine(const String &line, Session &s) {
   if (!strcmp(cmd, "preset")) {
     int id = doc["id"] | 1;
     activePreset = constrain(id, 0, 2);
-    fault = "";
+    resumeLeveling();
   } else if (!strcmp(cmd, "set")) {
     const char *axle = doc["axle"] | "front";
     int psi = doc["psi"] | 40;
     if (!strcmp(axle, "front")) presets[activePreset].front = constrain(psi, BAG_MIN, BAG_MAX);
-    else presets[activePreset].rear = constrain(psi, BAG_MIN, BAG_MAX);
+    else if (!strcmp(axle, "rear")) presets[activePreset].rear = constrain(psi, BAG_MIN, BAG_MAX);
+    else { s.ev = "bad_input"; return; }
+    resumeLeveling();
   } else if (!strcmp(cmd, "auto")) {
     riseOnStart = doc["rise"] | riseOnStart;
     dropOnStop = doc["drop"] | dropOnStop;
   } else if (!strcmp(cmd, "theme")) {
     theme = constrain((int)(doc["id"] | 1), 0, 2);
   } else if (!strcmp(cmd, "manual")) {
+    // Katup dipegang applyAxle() selama tombol ditahan; tutup sendiri setelah MANUAL_MAX_MS,
+    // saat koneksi pengirim putus, atau saat tekanan mencapai BAG_MAX/BAG_MIN.
     const char *axle = doc["axle"] | "front";
     const char *action = doc["action"] | "stop";
-    int fill = !strcmp(axle, "rear") ? PIN_FILL_R : PIN_FILL_F;
-    int dump = !strcmp(axle, "rear") ? PIN_DUMP_R : PIN_DUMP_F;
-    setValve(fill, !strcmp(action, "fill"));
-    setValve(dump, !strcmp(action, "dump"));
+    Axle &a = !strcmp(axle, "rear") ? axR : axF;
+    a.manual = !strcmp(action, "fill") ? MAN_FILL : !strcmp(action, "dump") ? MAN_DUMP : MAN_NONE;
+    a.manualAt = millis();
+    a.manualBy = sessionOwner(s);
+    if (!a.manual) { setValve(a.fillPin, false); setValve(a.dumpPin, false); }
     return;
   } else if (!strcmp(cmd, "stop")) {
+    // Keselamatan: tutup semua katup DAN hentikan leveling otomatis sampai preset dipilih lagi.
+    cancelManual();
     allValvesOff();
+    levelHold = true;
+    axF.filling = axF.dumping = axR.filling = axR.dumping = false;
+    Serial.println("STOP: semua katup tutup, leveling otomatis berhenti sampai preset dipilih");
     return;
   } else if (!strcmp(cmd, "wifi")) {
     // {"cmd":"wifi","ssid":"Router","pass":"rahasia"} → sambung ke router (STA). ssid kosong = matikan STA.
@@ -438,7 +606,7 @@ void handleLine(const String &line, Session &s) {
       if (validApPass(p)) {
         apPass = p;
         secPrefs.putString("appass", apPass);
-        apRestartAt = millis() + 2000;
+        apRestartAt = deadlineIn(2000);
         s.ev = "saved";
       } else s.ev = "bad_appass";
     }
@@ -448,6 +616,19 @@ void handleLine(const String &line, Session &s) {
 }
 
 void pollBle() {
+  bool evt;
+  {
+    std::lock_guard<std::mutex> g(bleMx);
+    evt = bleConnEvt;
+    bleConnEvt = false;
+    if (evt) rxLine = "";
+    rxLine += bleRxShared;
+    bleRxShared = "";
+  }
+  if (evt) {               // HP baru tersambung / putus → sesi terkunci lagi, tombol manual BLE dilepas
+    bleSession = {false, nullptr};
+    cancelManual(0, false);
+  }
   if (rxLine.length() > 512) rxLine = "";  // buang sampah tanpa "\n"
   bool replied = false;
   while (rxLine.indexOf('\n') >= 0) {
@@ -484,6 +665,7 @@ void buildStatus(JsonDocument &doc, Session *s) {
   doc["fault"] = fault;
   doc["acc"] = accOn;                                // kontak/ACC
   doc["rm"] = rmStateCode();                         // remote internet: 0 mati … 3 online (lihat PROTOKOL)
+  if (levelHold) doc["hold"] = true;   // STOP aktif: leveling otomatis berhenti
   if (s) {
     doc["auth"] = s->authed;                         // sesi ini sudah memasukkan kode akses?
     if (s->authed) doc["def"] = credsAreDefault();   // masih pakai kredensial default (hanya ke sesi login)
@@ -569,7 +751,7 @@ String wifiStatusJson(Session *s = nullptr) {
   buildStatus(doc, s);
   doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   doc["sta"] = WiFi.status() == WL_CONNECTED;
-  doc["ble"] = bleConnected;
+  doc["ble"] = bleConnected.load();
   String out;
   serializeJson(doc, out);
   return out;
@@ -597,6 +779,7 @@ void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
     ws.sendTXT(num, s);
   } else if (type == WStype_DISCONNECTED) {
     ss = {false, nullptr};
+    cancelManual(1 + num, false);
   } else if (type == WStype_TEXT) {
     if (len > 1024) return;
     String text;
@@ -638,7 +821,7 @@ void setupWifi() {
   // HTTP tanpa sesi: body harus diawali {"cmd":"auth","code":"…"} (atau tiap perintah membawa "code").
   http.on("/api/cmd", HTTP_POST, []() {
     sendCors();
-    Session hs = {false, nullptr};
+    Session hs = {false, nullptr, false};
     String body = http.arg("plain");
     if (body.length() > 2048) { http.send(413, "text/plain", "terlalu besar"); return; }
     handleLines(body, hs);
@@ -860,15 +1043,14 @@ void hmacHex(const String &key, const char *msg, size_t len, char out[65]) {
 
 // STOP remote lewat jalur yang sama dengan STOP lokal (handleLine), supaya semantik STOP selalu identik.
 void rmStop() {
-  Session rs = {true, nullptr};
-  handleLine("{\"cmd\":\"stop\"}", rs);
+  rmSession = {true, nullptr, false};
+  handleLine("{\"cmd\":\"stop\"}", rmSession);
 }
 
 void rmBadCode(const char *rid) {
   if (++authFails >= AUTH_MAX_FAIL) {
     authFails = 0;
-    authLockUntil = millis() + AUTH_LOCK_MS;
-    if (!authLockUntil) authLockUntil = 1;
+    authLockUntil = deadlineIn(AUTH_LOCK_MS);
     Serial.println("Remote: terlalu banyak tanda tangan salah, dikunci 30 detik");
     rmEvent("locked", rid);
   } else rmEvent("bad_code", rid);
@@ -883,7 +1065,7 @@ void rmHandle(const char *data, size_t len) {
     const char *c = d["cmd"] | "";
     if (!strcmp(c, "stop")) { rmStop(); rmEvent("stop_ok", d["r"] | ""); rmForcePub = true; }
     // "live" hanya mempercepat telemetri (tanpa kontrol) → boleh tanpa tanda tangan.
-    else if (!strcmp(c, "live")) { if (!rmLiveUntil || (int32_t)(rmLiveUntil - millis()) < RM_LIVE_MS / 2) rmForcePub = true; rmLiveUntil = millis() + RM_LIVE_MS; }
+    else if (!strcmp(c, "live")) { if (!rmLiveUntil || (int32_t)(rmLiveUntil - millis()) < RM_LIVE_MS / 2) rmForcePub = true; rmLiveUntil = deadlineIn(RM_LIVE_MS); }
     return;
   }
   if (len < 67 || data[64] != ' ') return;
@@ -909,19 +1091,19 @@ void rmHandle(const char *data, size_t len) {
   if (!sameSecret(String(want), got)) { rmBadCode(rid); return; }
   authFails = 0;
   rmLastQ = q;
-  rmLiveUntil = millis() + RM_LIVE_MS;
+  rmLiveUntil = deadlineIn(RM_LIVE_MS);
   rmForcePub = true;
   if (!strcmp(cmd, "security") || !strcmp(cmd, "wifi") || !strcmp(cmd, "remote") || !strcmp(cmd, "rinfo")) { rmEvent("local_only", rid); return; }
   // Isi/buang manual lewat internet ditolak: kalau koneksi putus saat tombol ditahan, katup bisa terus terbuka.
   if (!strcmp(cmd, "manual") && strcmp(d["action"] | "stop", "stop")) { rmEvent("no_manual_remote", rid); return; }
   if (!strcmp(cmd, "auth")) { rmEvent("auth_ok", rid); return; }
   if (!strcmp(cmd, "logout")) { rmEvent("logout", rid); return; }
-  Session rs = {true, nullptr};
+  rmSession = {true, nullptr, false};
   String line;
   line.reserve(jl);
   for (size_t i = 0; i < jl; i++) line += json[i];
-  handleLine(line, rs);
-  rmEvent(rs.ev ? rs.ev : "ok", rid);
+  handleLine(line, rmSession);   // jalur sama dengan lokal: STOP hold, resumeLeveling, kunci bocor, batas PSI
+  rmEvent(rmSession.ev ? rmSession.ev : "ok", rid);
   rmForcePub = true;
   Serial.printf("Remote: perintah %s\n", cmd);
 }
@@ -1010,8 +1192,10 @@ void remoteDisableAfterReset() {
 void pollBootButton() {
   static uint32_t pressedAt = 0, lastSec = 0;
   static bool done = false;
+  static bool seenHigh = false;  // GPIO0 harus pernah HIGH dulu: jalur yang macet LOW (DTR/RTS, tombol rusak) tidak me-reset
   bool down = digitalRead(PIN_BOOT) == LOW;
   uint32_t now = millis();
+  if (!seenHigh) { seenHigh = !down; if (!seenHigh) return; }
   if (!down) {
     if (pressedAt && !done && now - pressedAt > 1000) Serial.println("BOOT dilepas — reset kredensial dibatalkan");
     pressedAt = 0;
@@ -1062,8 +1246,9 @@ void setup() {
   loadCreds();
 
   Wire.begin(21, 22);
-  if (!ads.begin()) Serial.println("ADS1115 tidak ditemukan");
-  ads.setGain(GAIN_TWOTHIRDS);
+  adsOk = ads.begin();
+  if (adsOk) ads.setGain(GAIN_TWOTHIRDS);
+  else { Serial.println("ADS1115 tidak ditemukan — katup & kompresor tidak dijalankan sampai sensor terbaca"); adsRetryAt = deadlineIn(ADS_RETRY_MS); }
 
   SPI.begin(18, -1, 23);
   displayOk = true;
@@ -1071,6 +1256,7 @@ void setup() {
   tft.setRotation(0);
   tft.fillScreen(GC9A01A_BLACK);
 
+#ifndef RZM_SIM_QEMU  // QEMU tidak meniru radio Bluetooth (env esp32dev_qemu hanya untuk uji boot)
   BLEDevice::init("RZM-AIR");
   // Keamanan BLE: bonding + MITM dengan passkey statis (PIN Bluetooth). Modul "menampilkan" PIN,
   // HP mengetik PIN itu saat pairing. Link wajib terenkripsi untuk RX/TX.
@@ -1094,34 +1280,56 @@ void setup() {
   txChar->addDescriptor(cccd);
   service->start();
   server->getAdvertising()->start();
+#endif
+#ifndef RZM_SIM_QEMU  // QEMU juga tidak meniru PHY WiFi
   setupWifi();
   setupRemote();
+#else
+  prefs.begin("rzm", false);
+  Serial.println("QEMU: BLE & WiFi dilewati (tidak diemulasikan)");
+#endif
   Serial.println("RZM-AIR ready");
   if (credsAreDefault())
     Serial.println("PERINGATAN: masih pakai kredensial default (kode 1234 / PIN BT 123456 / WiFi rzmong123). Ganti di UI → KEAMANAN.");
+  // Watchdog loop (5 dtk): kalau loop() macet, ESP32 restart → semua relay kembali mati saat boot.
+  enableLoopWDT();
+}
+
+// ACC dengan debounce: tegangan drop sesaat (starter) tidak dianggap kunci kontak mati.
+void pollAcc() {
+  static bool rawLast = false;
+  static uint32_t changedAt = 0;
+#ifndef RZM_SIM_QEMU
+  bool raw = analogRead(PIN_ACC) > 2500;
+#else
+  bool raw = false;  // SAR ADC ESP32 tidak diemulasikan QEMU
+#endif
+  uint32_t now = millis();
+  if (raw != rawLast) { rawLast = raw; changedAt = now; }
+  if (raw == accOn || now - changedAt < ACC_DEBOUNCE_MS) return;
+  accOn = raw;
+  if (accOn && riseOnStart) { activePreset = 1; resumeLeveling(); }
+  if (!accOn && dropOnStop) { activePreset = 0; resumeLeveling(); }
 }
 
 void loop() {
-  tankPsi = voltsToPsi(0, ads.readADC_SingleEnded(0));
-  frontPsi = voltsToPsi(1, ads.readADC_SingleEnded(1));
-  rearPsi = voltsToPsi(2, ads.readADC_SingleEnded(2));
-
-  bool accNow = analogRead(PIN_ACC) > 2500;
-  if (accNow && !accWas && riseOnStart) activePreset = 1;
-  if (!accNow && accWas && dropOnStop) activePreset = 0;
-  accWas = accNow;
-  accOn = accNow;
-
-  if (tankPsi < TANK_ON) setValve(PIN_COMP, true);
-  if (tankPsi > TANK_OFF) setValve(PIN_COMP, false);
-
-  applyAxle(frontPsi, presets[activePreset].front, PIN_FILL_F, PIN_DUMP_F, fillingF, fillStartF, "depan");
-  applyAxle(rearPsi, presets[activePreset].rear, PIN_FILL_R, PIN_DUMP_R, fillingR, fillStartR, "belakang");
+  readSensors();
+  pollAcc();
+  controlCompressor();
+  applyAxle(axF, frontPsi, sensorOk[1], presets[activePreset].front);
+  applyAxle(axR, rearPsi, sensorOk[2], presets[activePreset].rear);
 
   pollBootButton();
   pollBle();
+#ifndef RZM_SIM_QEMU
   pollWifi();
   pollRemote();
+#endif
+  updateFault();
+#ifdef RZM_SIM_QEMU
+  static uint32_t hb = 0;
+  if (millis() - hb > 2000) { hb = millis(); Serial.printf("QEMU t=%lu ads=%d tank=%.0f F=%.0f R=%.0f comp=%d fault=\"%s\"\n", (unsigned long)millis(), adsOk, tankPsi, frontPsi, rearPsi, compRunning, fault.c_str()); }
+#endif
   drawDisplay();
   delay(40);
 }
