@@ -28,8 +28,11 @@ firmware/
   rzmong_airsuspension/web_assets.h               DIBUAT OTOMATIS dari web/control (tools/embed_web.py)
   kalibrasi_sensor/                               Sketch kalibrasi sensor tekanan
   platformio.ini, merge_bin.sh                    Build PlatformIO + penggabung .bin
+  test_host/                                      Simulasi firmware di PC (run.sh) + uji boot QEMU (qemu.sh)
 tools/
   embed_web.py       Bundel web/control → web_assets.h
+  mock_modul.py      Modul RZM-AIR tiruan (HTTP) untuk tes UI tanpa ESP32
+  uji_ui_mock.py     Uji UI headless (Playwright) terhadap mock_modul.py
   pixel/             Generator sprite mobil pixel (Python)
 android/             Proyek Capacitor (APK Android)
 docs/                Tutorial, wiring, protokol, dan panduan ini
@@ -316,21 +319,80 @@ Perintah protokolnya (`auth`, `logout`, `security`) ada di `docs/PROTOKOL.md`.
 4. Di HP: lupakan/unpair `RZM-AIR`, sambungkan ulang, lalu segera ganti kredensial default.
 
 Mengubah pin atau lama tahan: konstanta `PIN_BOOT` (0 untuk ESP32 klasik/esp32dev; **9** untuk ESP32-C3), `PIN_LED`, dan
-`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode: `AUTH_MAX_FAIL` (5) dan `AUTH_LOCK_MS` (30 dtk).
+`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode (per klien: Bluetooth / per IP WiFi): `AUTH_MAX_FAIL` (5), `AUTH_LOCK_MS` (30 dtk, berlipat tiap kunci),
+`AUTH_LOCK_MAX_MS` (15 mnt), `AUTH_DECAY_MS` (15 mnt), `AUTH_SLOTS` (1 BLE + 8 IP).
 
 ### Catatan keamanan
 - Status JSON tidak pernah memuat kode, sandi, atau PIN. Log protokol di UI menyamarkannya (`••••`).
-- Tombol **STOP** (tutup semua katup) tetap diterima tanpa kode, demi keselamatan.
+- Tombol **STOP** (tutup semua katup) tetap diterima tanpa kode, demi keselamatan. Mulai 0.3.1 STOP juga menghentikan
+  leveling otomatis sampai preset dipilih lagi (status `hold:true`, fault `STOP: pilih preset`). Mulai 0.3.2 status ini
+  disimpan di flash, jadi tetap berlaku setelah restart/watchdog.
+- Salah kode dihitung per klien, jadi orang di WiFi tidak bisa mengunci kamu di Bluetooth. Tetap saja: kode 4 angka bisa
+  ditebak pelan-pelan dari banyak IP (±30 tebakan/jam). **Pakai kode akses 8+ karakter campuran** dan ganti sandi WiFi default.
 - Kredensial disimpan apa adanya di flash ESP32. Orang yang memegang modul fisik bisa membaca flash atau menekan BOOT,
   jadi pasang modul di tempat yang tidak mudah dijangkau.
 - WiFi lewat HTTP biasa (tanpa TLS); keamanannya bergantung pada sandi WPA2 `RZMONG-AIR`. BLE terenkripsi setelah pairing.
 
 ---
 
-## 11. Checklist sebelum push
+## 11. Tes firmware tanpa ESP32 (simulasi)
+
+Ada tiga lapis uji yang bisa dijalankan di komputer sendiri (Linux/macOS/WSL). Jalankan setelah mengubah firmware.
+
+### A. Simulasi host (paling penting, ±10 detik)
+Firmware **asli** (`rzmong_airsuspension.ino`) dikompilasi untuk PC memakai stub Arduino/ESP32 di `firmware/test_host/stubs/`,
+lalu dijalankan dengan waktu virtual. Sensor (tegangan ADS1115), ACC, tombol BOOT, BLE, WebSocket, HTTP, dan NVS disimulasikan.
+Dikompilasi dengan AddressSanitizer + UBSan, jadi akses memori salah langsung ketahuan.
+
+```bash
+cd firmware
+pio run -e esp32dev          # sekali saja, supaya library ArduinoJson terunduh (kalau tidak, run.sh meng-clone sendiri)
+test_host/run.sh             # semua tes
+test_host/run.sh STOP        # hanya tes yang namanya mengandung "STOP"
+```
+Butuh `g++` (Debian/Ubuntu: `sudo apt install g++`). Hasil akhir harus `N lulus, 0 gagal`. Yang diuji antara lain:
+kode akses + kunci 5× salah/30 dtk (termasuk saat `millis()` meluap di hari ke-49), kunci per klien (BLE / IP / WebSocket),
+kunci bertingkat sampai 15 menit + peluruhan, penyerang berganti 50 IP, STOP tersimpan di flash & tetap aktif setelah restart,
+flash hanya ditulis saat nilai berubah, validasi perintah `wifi`, validasi ganti kredensial, rahasia tidak
+bocor di status/serial, JSON rusak, BLE+WebSocket+HTTP bersamaan, BLE ditulis dari thread lain (balapan data), STOP, manual
+(tahan tombol, HP putus, batas 20 dtk), timeout bocor 90 dtk, sensor putus/korslet, ADS1115 lepas, kompresor (histeresis +
+batas 10 menit), ACC + debounce starter, tombol BOOT 8 dtk/batal/macet LOW, NVS rusak, ukuran status BLE, watchdog, dan fuzz
+3000 langkah (katup isi & buang satu as tidak pernah terbuka bersamaan).
+
+Menambah tes: tulis fungsi `static void t_namaku() { boot(); ... CHECK(kondisi, "pesan"); }` di
+`firmware/test_host/test_firmware.cpp`, lalu daftarkan di array `TESTS[]`. Helper: `setPsi(tangki, depan, belakang)`,
+`run(ms)`, `on(PIN_...)`, `ble("{...}")`, `wsSend(0, "{...}")`, `post("{...}")`, `sim::pinIn[PIN_BOOT]`, `sim::analog[PIN_ACC]`,
+`sim::adsPresent`.
+
+### B. Emulator ESP32 (QEMU) — uji boot
+```bash
+cd firmware
+test_host/qemu.sh 30         # unduh Espressif QEMU (sekali), build env esp32dev_qemu, jalankan 30 detik
+```
+QEMU **tidak** meniru radio Bluetooth, PHY WiFi, dan ADC, jadi env `esp32dev_qemu` (flag `RZM_SIM_QEMU`) melewati bagian itu.
+Yang dicek: firmware boot, NVS terbuka, peringatan kredensial default, loop jalan terus tanpa panic, dan ADS1115 yang tidak
+menjawab ditangani (log `QEMU t=… fault="sensor ADS1115"` tiap 2 detik). Reset `TG1WDT/TG0WDT` di awal boot adalah
+artefak kecepatan QEMU (juga muncul di bootloader), bukan bug firmware. **Jangan flash env `esp32dev_qemu` ke mobil.**
+
+### C. Web UI headless vs modul tiruan
+```bash
+pip install playwright && python -m playwright install chromium
+python3 tools/uji_ui_mock.py
+```
+Menjalankan `tools/mock_modul.py` + server web lokal di port acak, lalu Chromium headless mengetes: layar kunci, kode salah/benar,
+peringatan kredensial default, preset, STOP (`STOP: pilih preset`), manual tahan tombol, ganti kode akses, logout, kunci 5× salah.
+
+### Yang tetap harus dites di alat asli
+Pairing BLE dengan PIN, WiFi AP restart setelah ganti sandi, tombol BOOT fisik, pembacaan ADS1115 + kalibrasi, relay/katup/kompresor
+sungguhan, tegangan ACC, dan watchdog (restart saat loop macet). Lihat checklist di `docs/TUTORIAL.md`.
+
+---
+
+## 12. Checklist sebelum push
 
 - [ ] Tes di `localhost`, dan Console tidak menampilkan error
 - [ ] Jika sprite berubah: `python3 tools/pixel/gen_pix.py`
 - [ ] Jika `web/control` berubah: versi `sw.js` dinaikkan + `python3 tools/embed_web.py`
 - [ ] Jika firmware/`web/control` berubah: build `pio run -e esp32dev` lalu `./merge_bin.sh` (memperbarui `web/flash/firmware/*.bin`) dan naikkan `version` di `web/flash/firmware/manifest.json`
+- [ ] Jika firmware berubah: `firmware/test_host/run.sh` harus `0 gagal`
 - [ ] Tidak meng-commit file build (`node_modules/`, `www/`, `.pio/`, `*.apk`, `__pycache__/`); semuanya sudah ada di `.gitignore`
