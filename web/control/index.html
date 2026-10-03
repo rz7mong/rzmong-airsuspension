@@ -9,9 +9,9 @@
     :root { --bg:#07101c; --panel:#101a2bcc; --line:#2a4068; --text:#e7f0ff; --dim:#8ea0c0; --accent:#3ee0ff; --warn:#ff4d6a; }
     [data-theme="day"] { --accent:#d7e6ff; --bg:#121821; }
     [data-theme="stance"] { --accent:#ff2a4a; --line:#5a2030; }
-    * { box-sizing: border-box; }
+    * { box-sizing:border-box; }
     body { margin:0; min-height:100vh; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, sans-serif;
-      background: radial-gradient(900px 400px at 70% -10%, #16345e55, transparent 60%), var(--bg); }
+      background:radial-gradient(900px 400px at 70% -10%, #16345e55, transparent 60%), var(--bg); }
     header, main { width:min(980px, 94vw); margin:0 auto; }
     header { display:flex; justify-content:space-between; align-items:end; padding:28px 0 12px; gap:12px; }
     h1 { margin:0; font-size:1.05rem; letter-spacing:.22em; font-weight:560; }
@@ -23,15 +23,14 @@
     .readout b { display:block; font-size:3rem; letter-spacing:-.04em; }
     .readout span { color:var(--dim); letter-spacing:.16em; font-size:.72rem; }
     .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
-    button { background:transparent; color:var(--text); border:1px solid var(--line); border-radius:999px; padding:10px 16px; letter-spacing:.06em; cursor:pointer; }
-    button.active, button:hover { border-color:var(--accent); color:var(--accent); }
+    button, .chip { background:transparent; color:var(--text); border:1px solid var(--line); border-radius:999px; padding:10px 16px; letter-spacing:.04em; cursor:pointer; }
+    button.active, button:hover, .chip.on { border-color:var(--accent); color:var(--accent); }
     label { display:flex; justify-content:space-between; color:var(--dim); font-size:.85rem; margin-top:12px; }
     input[type="range"] { width:100%; accent-color:var(--accent); }
     .fault { color:var(--warn); min-height:1.2em; }
-    .car-wrap svg, .hw svg { width:100%; height:auto; }
-    .pulse { animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 50% { opacity:.45; } }
-    .log { font-size:.8rem; color:var(--dim); min-height:2.4em; }
+    .log { font-size:.85rem; color:var(--dim); min-height:3.2em; line-height:1.45; }
+    svg { width:100%; height:auto; }
+    .hit { cursor:pointer; }
     @media (max-width:800px) { .grid { grid-template-columns:1fr; } }
   </style>
 </head>
@@ -49,9 +48,9 @@
         <svg id="arc" viewBox="0 0 200 200" width="250" height="250"></svg>
         <div class="readout"><b id="tank">0</b><span>🛢️ TANGKI PSI</span></div>
       </article>
-      <article class="card car-wrap">
-        <div class="sub">🚗 TINGGI MOBIL MENGIKUTI PSI</div>
-        <svg id="car" viewBox="0 0 360 180"></svg>
+      <article class="card">
+        <div class="sub">🚗 MOBIL MENGIKUTI PSI</div>
+        <svg id="car" viewBox="0 0 360 190"></svg>
         <div class="row">
           <button id="up">⬆️ NAIK</button>
           <button id="down">⬇️ TURUN</button>
@@ -59,7 +58,6 @@
         </div>
       </article>
     </section>
-
     <section class="grid" style="margin-top:14px">
       <article class="card">
         <div class="row" id="presets">
@@ -79,18 +77,26 @@
           <button data-theme="stance">🔥 STANCE</button>
         </div>
         <p class="fault" id="fault"></p>
-        <p class="log" id="log">Ketuk preset atau geser slider. Mode demo jalan tanpa modul.</p>
+        <p class="log" id="log">Ketuk bagian hardware untuk lihat fungsinya. Mode demo jalan tanpa modul.</p>
       </article>
-      <article class="card hw">
-        <div class="sub">🧰 HARDWARE 2 TITIK</div>
-        <svg id="hw" viewBox="0 0 360 220"></svg>
-        <p class="log">Angin dari tangki masuk lewat solenoid. Sensor depan hanya satu angka untuk dua balon.</p>
+      <article class="card">
+        <div class="sub">🧰 KETUK HARDWARE</div>
+        <svg id="hw" viewBox="0 0 360 230"></svg>
+        <div class="row" id="chips"></div>
       </article>
     </section>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { tank: 128, front: 50, rear: 55, preset: 1, rise: true, drop: false, fault: "", demo: true, comp: false };
+    const parts = {
+      pump: ["⚙️ Kompresor", "Mengisi tangki. Hidup di bawah 145 psi, mati di 165 psi. Jangan lewat relay kecil."],
+      tank: ["🛢️ Tangki", "Penyimpan udara. Sensor tangki membaca psi yang tampil di speedo."],
+      esp: ["🎛️ ESP32", "Otak modul. Membaca sensor, menggerakkan solenoid, dan bicara ke HP lewat Bluetooth RZM-AIR."],
+      valve: ["🔧 Solenoid", "Empat katup: isi/buang depan dan isi/buang belakang. Normally closed."],
+      front: ["🔵 Depan", "Dua balon satu saluran. Sensor hanya satu angka. Bocor di satu balon mengempiskan keduanya."],
+      rear: ["🟣 Belakang", "Sama seperti depan, saluran terpisah. Preset menyimpan psi depan dan belakang sendiri."]
+    };
+    const state = { tank:128, front:50, rear:55, preset:1, rise:true, drop:false, fault:"", demo:true, comp:false, part:"esp" };
     const targets = [{f:25,r:25},{f:50,r:55},{f:75,r:80}];
     let rxChar;
 
@@ -99,107 +105,86 @@
       const a0 = -210 * Math.PI / 180, a1 = 30 * Math.PI / 180, ang = a0 + (a1 - a0) * p;
       const arc = (to) => {
         const x = 100 + 78 * Math.cos(to), y = 100 + 78 * Math.sin(to);
-        const large = to - a0 > Math.PI ? 1 : 0;
-        return `M ${100+78*Math.cos(a0)} ${100+78*Math.sin(a0)} A 78 78 0 ${large} 1 ${x} ${y}`;
+        return `M ${100+78*Math.cos(a0)} ${100+78*Math.sin(a0)} A 78 78 0 ${to-a0>Math.PI?1:0} 1 ${x} ${y}`;
       };
       $("arc").innerHTML = `<path d="${arc(a1)}" stroke="#24344f" stroke-width="8" fill="none"/>
         <path d="${arc(ang)}" stroke="var(--accent)" stroke-width="8" fill="none" stroke-linecap="round"/>`;
     }
-
     function drawCar() {
-      const lift = (psi) => 18 - (psi - 15) / 95 * 28;
-      const yf = lift(state.front), yr = lift(state.rear);
+      const lift = (psi) => 22 - (psi - 15) / 95 * 30;
+      const yf = lift(state.front), yr = lift(state.rear), body = 78 + Math.min(yf, yr);
       $("car").innerHTML = `
-        <rect x="40" y="${70+Math.min(yf,yr)}" width="270" height="36" rx="16" fill="#16345e" stroke="var(--accent)"/>
-        <path d="M90 ${70+Math.min(yf,yr)} l30-28 h90 l28 28" fill="#0d2240" stroke="var(--accent)"/>
-        <circle cx="110" cy="${128+yf}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
-        <circle cx="250" cy="${128+yr}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
-        <text x="78" y="${168+yf}" fill="#8fd0ff" font-size="12">🔵 ${Math.round(state.front)} psi</text>
-        <text x="214" y="${168+yr}" fill="#d7b3ff" font-size="12">🟣 ${Math.round(state.rear)} psi</text>`;
+        <rect x="46" y="${body}" width="260" height="34" rx="16" fill="#16345e" stroke="var(--accent)"/>
+        <path d="M96 ${body} l28-26 h88 l26 26" fill="#0d2240" stroke="var(--accent)"/>
+        <circle cx="112" cy="${132+yf}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
+        <circle cx="248" cy="${132+yr}" r="22" fill="#111" stroke="var(--accent)" stroke-width="4"/>
+        <text x="78" y="${172+yf}" fill="#8fd0ff" font-size="12">🔵 ${Math.round(state.front)}</text>
+        <text x="214" y="${172+yr}" fill="#d7b3ff" font-size="12">🟣 ${Math.round(state.rear)}</text>`;
     }
-
+    function bag(cx, color, psi) {
+      const h = 18 + psi / 110 * 22;
+      return `<ellipse class="hit" data-part="${color==='#8fd0ff'?'front':'rear'}" cx="${cx}" cy="${168-h/2}" rx="24" ry="${h/2}" fill="#10233f" stroke="${color}" stroke-width="3"/>`;
+    }
     function drawHw() {
-      const comp = state.comp ? "var(--accent)" : "#8ea0c0";
+      const flow = state.comp ? "#3ee0ff" : "#355074";
       $("hw").innerHTML = `
-        <rect x="16" y="36" width="70" height="46" rx="8" fill="#10233f" stroke="${comp}"/>
-        <text x="28" y="64" fill="${comp}" font-size="12">⚙️ pompa</text>
-        <rect x="112" y="28" width="54" height="70" rx="8" fill="#10233f" stroke="var(--accent)"/>
-        <text x="122" y="68" fill="var(--accent)" font-size="12">🛢️</text>
-        <rect x="196" y="40" width="64" height="40" rx="8" fill="#10233f" stroke="#8fd0ff"/>
-        <text x="206" y="64" fill="#8fd0ff" font-size="11">🎛️ ESP</text>
-        <circle cx="70" cy="150" r="22" fill="#123" stroke="#8fd0ff"/>
-        <circle cx="150" cy="150" r="22" fill="#123" stroke="#8fd0ff"/>
-        <circle cx="230" cy="150" r="22" fill="#123" stroke="#d7b3ff"/>
-        <circle cx="300" cy="150" r="22" fill="#123" stroke="#d7b3ff"/>
-        <path d="M86 58 H112 M166 62 H196 M150 98 V128 M230 98 V128" stroke="var(--accent)" fill="none"/>
-        <text x="48" y="196" fill="#8fd0ff" font-size="11">depan L/R</text>
-        <text x="214" y="196" fill="#d7b3ff" font-size="11">belakang L/R</text>
-        ${state.comp ? '<circle class="pulse" cx="40" cy="48" r="5" fill="var(--accent)"/>' : ''}`;
+        <g class="hit" data-part="pump"><rect x="16" y="28" width="78" height="48" rx="10" fill="#10233f" stroke="${state.comp?'var(--accent)':'#8ea0c0'}"/><text x="30" y="56" fill="#e7f0ff" font-size="13">⚙️ pompa</text></g>
+        <g class="hit" data-part="tank"><rect x="124" y="20" width="50" height="72" rx="10" fill="#10233f" stroke="var(--accent)"/><text x="136" y="62" font-size="18">🛢️</text></g>
+        <g class="hit" data-part="esp"><rect x="206" y="34" width="70" height="42" rx="10" fill="#10233f" stroke="#8fd0ff"/><text x="220" y="60" fill="#8fd0ff" font-size="13">🎛️ ESP</text></g>
+        <g class="hit" data-part="valve"><rect x="292" y="36" width="52" height="38" rx="8" fill="#10233f" stroke="#ffb45e"/><text x="304" y="60" font-size="14">🔧</text></g>
+        <path d="M94 52 H124 M174 56 H206 M258 56 H292" stroke="${flow}" fill="none" stroke-width="3"/>
+        ${bag(70,'#8fd0ff',state.front)}${bag(140,'#8fd0ff',state.front)}
+        ${bag(230,'#d7b3ff',state.rear)}${bag(300,'#d7b3ff',state.rear)}
+        <path d="M150 92 V120 M250 92 V120" stroke="${flow}" fill="none"/>
+        <text x="54" y="214" fill="#8fd0ff" font-size="11">depan</text>
+        <text x="214" y="214" fill="#d7b3ff" font-size="11">belakang</text>`;
+      $("hw").querySelectorAll(".hit").forEach((el) => el.onclick = () => { state.part = el.dataset.part; paint(); });
     }
-
     function paint() {
       $("tank").textContent = Math.round(state.tank);
-      $("frontOut").value = Math.round(state.front);
-      $("rearOut").value = Math.round(state.rear);
+      $("frontOut").value = Math.round($("frontRange").value);
+      $("rearOut").value = Math.round($("rearRange").value);
       $("fault").textContent = state.fault ? "⚠️ " + state.fault : "";
       $("rise").classList.toggle("active", state.rise);
       $("drop").classList.toggle("active", state.drop);
       document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("active", Number(b.dataset.id) === state.preset));
+      const [title, text] = parts[state.part];
+      $("log").textContent = title + " — " + text;
+      $("chips").innerHTML = Object.entries(parts).map(([k,v]) => `<button class="chip ${k===state.part?'on':''}" data-part="${k}">${v[0].split(' ')[0]}</button>`).join("");
+      $("chips").querySelectorAll(".chip").forEach((b) => b.onclick = () => { state.part = b.dataset.part; paint(); });
       drawArc(); drawCar(); drawHw();
     }
-
-    function note(text) { $("log").textContent = text; }
     async function send(obj) {
-      note("📤 " + JSON.stringify(obj));
       if (!rxChar) return;
       await rxChar.writeValue(new TextEncoder().encode(JSON.stringify(obj) + "\n"));
     }
-
     $("connect").onclick = async () => {
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ name: "RZM-AIR" }],
-        optionalServices: ["6e400001-b5a3-f393-e0a9-e50e24dcca9e"]
-      });
+      const device = await navigator.bluetooth.requestDevice({ filters:[{name:"RZM-AIR"}], optionalServices:["6e400001-b5a3-f393-e0a9-e50e24dcca9e"] });
       const server = await device.gatt.connect();
       const service = await server.getPrimaryService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
       rxChar = await service.getCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
       const tx = await service.getCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
       await tx.startNotifications();
       tx.addEventListener("characteristicvaluechanged", (ev) => {
-        new TextDecoder().decode(ev.target.value).split("\n").filter(Boolean).forEach((line) => {
-          Object.assign(state, JSON.parse(line));
-          state.demo = false;
-          paint();
-        });
+        new TextDecoder().decode(ev.target.value).split("\n").filter(Boolean).forEach((line) => { Object.assign(state, JSON.parse(line)); state.demo = false; paint(); });
       });
-      note("📡 terhubung ke RZM-AIR");
     };
-
-    document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => {
-      state.preset = Number(b.dataset.id);
-      send({ cmd: "preset", id: state.preset });
-      paint();
-    });
-    $("frontRange").oninput = (e) => { state.front = Number(e.target.value); send({ cmd: "set", axle: "front", psi: state.front }); paint(); };
-    $("rearRange").oninput = (e) => { state.rear = Number(e.target.value); send({ cmd: "set", axle: "rear", psi: state.rear }); paint(); };
-    $("rise").onclick = () => { state.rise = !state.rise; send({ cmd: "auto", rise: state.rise, drop: state.drop }); paint(); };
-    $("drop").onclick = () => { state.drop = !state.drop; send({ cmd: "auto", rise: state.rise, drop: state.drop }); paint(); };
-    $("up").onclick = () => { state.preset = 2; send({ cmd: "preset", id: 2 }); paint(); };
-    $("down").onclick = () => { state.preset = 0; send({ cmd: "preset", id: 0 }); paint(); };
-    $("stop").onclick = () => send({ cmd: "stop" });
-    document.querySelectorAll("[data-theme]").forEach((b) => b.onclick = () => {
-      document.body.dataset.theme = b.dataset.theme;
-      send({ cmd: "theme", id: { day: 0, night: 1, stance: 2 }[b.dataset.theme] });
-      paint();
-    });
-
+    document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => { state.preset = Number(b.dataset.id); send({cmd:"preset", id:state.preset}); paint(); });
+    $("frontRange").oninput = (e) => { state.front = Number(e.target.value); send({cmd:"set", axle:"front", psi:state.front}); paint(); };
+    $("rearRange").oninput = (e) => { state.rear = Number(e.target.value); send({cmd:"set", axle:"rear", psi:state.rear}); paint(); };
+    $("rise").onclick = () => { state.rise = !state.rise; send({cmd:"auto", rise:state.rise, drop:state.drop}); paint(); };
+    $("drop").onclick = () => { state.drop = !state.drop; send({cmd:"auto", rise:state.rise, drop:state.drop}); paint(); };
+    $("up").onclick = () => { state.preset = 2; send({cmd:"preset", id:2}); paint(); };
+    $("down").onclick = () => { state.preset = 0; send({cmd:"preset", id:0}); paint(); };
+    $("stop").onclick = () => send({cmd:"stop"});
+    document.querySelectorAll("[data-theme]").forEach((b) => b.onclick = () => { document.body.dataset.theme = b.dataset.theme; send({cmd:"theme", id:{day:0,night:1,stance:2}[b.dataset.theme]}); paint(); });
     setInterval(() => {
       if (!state.demo) return;
       const t = targets[state.preset];
       state.front += (t.f - state.front) * 0.08;
       state.rear += (t.r - state.rear) * 0.08;
       state.comp = state.tank < 145;
-      state.tank = 150 + Math.sin(Date.now() / 700) * 8;
+      state.tank = 150 + Math.sin(Date.now()/700) * 8;
       paint();
     }, 80);
     paint();
