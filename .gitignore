@@ -1,1 +1,3 @@
 __pycache__/
+tools/.mock_ui.log
+tools/.ui_*.png

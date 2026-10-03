@@ -60,13 +60,22 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 {"cmd":"set","axle":"front","psi":45}           // ubah target preset AKTIF (15–110), disimpan ke flash
 {"cmd":"auto","rise":true,"drop":false}         // naik saat ACC hidup / turun saat ACC mati
 {"cmd":"theme","id":1}                          // tema layar bulat: 0 siang, 1 malam, 2 stance
-{"cmd":"manual","axle":"front","action":"fill"} // fill | dump | stop
-{"cmd":"stop"}                                  // semua katup tutup
+{"cmd":"manual","axle":"front","action":"fill"} // fill | dump | stop (tahan tombol → kirim stop saat dilepas)
+{"cmd":"stop"}                                  // semua katup tutup + leveling otomatis BERHENTI sampai preset dipilih
 {"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA (khusus firmware dengan WiFi)
 {"cmd":"wifi","appass":"sandiBaru8"}            // (lama) ganti sandi SoftAP; butuh sesi terbuka, berlaku ±2 detik
 ```
 
 Semua perintah di atas kecuali `stop` butuh sesi yang sudah `auth`.
+
+Perilaku katup (firmware 0.3.1+):
+- `manual` memegang katup as itu dan **menimpa** leveling otomatis selama tombol ditahan. Katup menutup sendiri kalau:
+  `action:"stop"` datang, koneksi pengirim (BLE / WebSocket) putus, sudah 20 dtk (`MANUAL_MAX_MS`), atau tekanan mencapai
+  `BAG_MAX` (isi) / `BAG_MIN` (buang). Setelah dilepas, leveling otomatis kembali ke target preset.
+- `stop` menutup semua katup dan menahan leveling (`"hold":true`) sampai `preset` atau `set` dikirim, atau ACC memicu
+  naik/turun otomatis. Manual tetap bisa dipakai saat hold.
+- `preset`/`set` juga membuka kunci fault (`bocor`, `buang macet`, `kompresor`) untuk mencoba lagi.
+- `set` dengan `axle` selain `front`/`rear` ditolak (`ev":"bad_input"`).
 
 ## Status (modul → HP)
 
@@ -75,7 +84,13 @@ Semua perintah di atas kecuali `stop` butuh sesi yang sudah `auth`.
  "theme":1,"pf":50,"pr":55,"fault":""}
 ```
 
-`pf`/`pr` = target depan/belakang preset aktif. `fault` contoh: `"depan bocor"`.
+`pf`/`pr` = target depan/belakang preset aktif. `hold` (hanya ada saat true) = STOP aktif.
+
+`fault` (satu teks, yang paling penting): `"sensor ADS1115"` (modul ADC tidak menjawab), `"sensor tangki"` /
+`"sensor depan"` / `"sensor belakang"` (tegangan di luar 0,25–4,75 V: kabel putus/korslet), `"depan bocor"` /
+`"belakang bocor"` (isi >90 dtk tanpa sampai target), `"depan buang macet"` / `"belakang buang macet"` (buang >90 dtk),
+`"kompresor >10 mnt"` (kompresor nyala 10 menit tanpa tangki penuh), `"STOP: pilih preset"`.
+Sensor rusak → katup as itu / kompresor tidak dijalankan. Fault bocor/buang macet/kompresor dikunci sampai `preset`/`set`.
 
 Field keamanan (firmware 0.3.0+): `auth` (bool, sesi ini terbuka?), `ev` (sekali kirim: `auth_ok`, `bad_code`, `locked`,
 `need_auth`, `saved`, `bad_newcode`, `bad_appass`, `bad_btpin`, `bad_input`, `logout`, `reset`), `def` (hanya ke sesi terbuka:
