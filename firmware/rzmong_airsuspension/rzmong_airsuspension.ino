@@ -91,9 +91,18 @@ class ServerCb : public BLEServerCallbacks {
   }
 };
 
-float voltsToPsi(int16_t raw) {
+struct Cal { float v0; float vRef; float pRef; bool ready; };
+Cal cal[3] = {
+  {0.50f, 4.50f, 200.0f, false},
+  {0.50f, 4.50f, 200.0f, false},
+  {0.50f, 4.50f, 200.0f, false}
+};
+
+float voltsToPsi(uint8_t ch, int16_t raw) {
   float v = raw * 0.0001875f;
-  float psi = (v - PSI_MIN_V) * (PSI_RANGE / (PSI_MAX_V - PSI_MIN_V));
+  float span = cal[ch].vRef - cal[ch].v0;
+  if (span < 0.05f) return 0;
+  float psi = (v - cal[ch].v0) * (cal[ch].pRef / span);
   return constrain(psi, 0, PSI_RANGE);
 }
 
@@ -375,6 +384,10 @@ void setup() {
   setValve(PIN_COMP, false);
   pinMode(PIN_ACC, INPUT);
   loadPrefs();
+  prefs.end();
+  prefs.begin("rzmcal", true);
+  if (prefs.isKey("cal")) prefs.getBytes("cal", cal, sizeof(cal));
+  prefs.end();
 
   Wire.begin(21, 22);
   if (!ads.begin()) Serial.println("ADS1115 tidak ditemukan");
@@ -401,9 +414,9 @@ void setup() {
 }
 
 void loop() {
-  tankPsi = voltsToPsi(ads.readADC_SingleEnded(0));
-  frontPsi = voltsToPsi(ads.readADC_SingleEnded(1));
-  rearPsi = voltsToPsi(ads.readADC_SingleEnded(2));
+  tankPsi = voltsToPsi(0, ads.readADC_SingleEnded(0));
+  frontPsi = voltsToPsi(1, ads.readADC_SingleEnded(1));
+  rearPsi = voltsToPsi(2, ads.readADC_SingleEnded(2));
 
   bool accNow = analogRead(PIN_ACC) > 2500;
   if (accNow && !accWas && riseOnStart) activePreset = 1;
