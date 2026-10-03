@@ -170,6 +170,8 @@ svg.cx{overflow:hidden}
 .cx-grille{fill:#0b0d12;stroke:#dfe4ea;stroke-width:1.2}
 .cx-neck{stroke:#14161c;stroke-width:3.4;fill:none;stroke-linecap:round}
 .cx-gt{fill:#101218;stroke:var(--accent);stroke-width:.9}
-.cx-cage path{stroke:#ffd21f;stroke-width:3.2;fill:none;stroke-linecap:round}
+.cx-cage path{stroke:#ffd21f;stroke-width:2.2;fill:none;stroke-linecap:round}
 .cx-cage .hl{stroke:#fff8c4;stroke-width:.8}
 html[data-theme="anime"] .cx-colors button{background:var(--sw);border-color:#ffd3e4}
+.cx-rod{stroke:#9aa3ad;stroke-width:2.2;fill:none;stroke-linecap:round}
+.cx-bellow{fill:#1b1d22;stroke:#3a3e46;stroke-width:.8}
