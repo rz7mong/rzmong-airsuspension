@@ -8,6 +8,8 @@
   <link rel="icon" href="../control/icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" />
   <link rel="stylesheet" href="../assets/neon.css" />
+  <link rel="stylesheet" href="../control/theme.css" />
+  <script src="../control/theme.js"></script>
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
     .head{padding:40px 0 10px}
@@ -45,7 +47,7 @@
 <body>
   <nav class="nav"><div class="wrap">
     <a class="brand" href="../"><span class="logo">RZ</span>RZMON-G AIR</a>
-    <div class="nav-links"><a href="../">Beranda</a><a href="../control/">Kontroler</a><a class="on" href="./">Flash</a></div>
+    <div class="nav-links"><a href="../">Beranda</a><a href="../control/">Kontroler</a><a class="on" href="./">Flash</a><span data-theme-picker></span></div>
   </div></nav>
 
   <header class="wrap head">
@@ -157,7 +159,7 @@
               const l = buf.slice(0, i + 1); buf = buf.slice(i + 1);
               const hi = /RZM-AIR ready|WiFi AP/.test(l);
               line(l, hi ? "hi" : "");
-              if (/RZM-AIR ready/.test(l)) setStep(5, 4);
+              if (/RZM-AIR ready/.test(l)) { setStep(5, 4); if (window.RZMTheme) RZMTheme.mascot.say("Firmware jalan~! Yatta! 🎉", "happy", 2600); }
             }
           }
         } catch (e) { line("\n— " + e.message + " —\n", "sys"); break; }

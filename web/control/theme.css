@@ -1,0 +1,125 @@
+/* RZMON-G — tema bersama (landing, kontroler, flash, aplikasi Android).
+   Pilih lewat data-theme di <html>: neon (default) | merah | terang | anime. Disimpan di localStorage "rzm.uitheme". */
+:root,html[data-theme="neon"]{
+  --surface:rgba(10,20,40,.88);--topbar:rgba(5,7,13,.6);--led-off:#223;--wheel:#05070d;--track:rgba(255,255,255,.07);
+  --car1:#123158;--car2:#060c18;--r:22px;--btn-r:14px;
+}
+html[data-theme="merah"]{
+  --bg:#0a0306;--glass:rgba(255,90,110,.05);--glass2:rgba(255,90,110,.10);--line:rgba(255,70,100,.24);--text:#ffeef1;--dim:#b88a93;
+  --accent:#ff2a4a;--accent2:#ffb547;--front:#ff6b6b;--rear:#ffb547;--glow:0 0 20px rgba(255,42,74,.5);
+  --surface:rgba(30,6,12,.9);--topbar:rgba(10,3,6,.65);--led-off:#311;--wheel:#0a0306;--track:rgba(255,255,255,.07);--car1:#4a0d18;--car2:#120306;
+}
+html[data-theme="merah"] body{background:radial-gradient(900px 500px at 85% -10%,rgba(255,42,74,.22),transparent 60%),radial-gradient(700px 500px at -10% 40%,rgba(255,181,71,.10),transparent 60%),var(--bg)}
+html[data-theme="terang"]{
+  --bg:#eef3fb;--glass:rgba(255,255,255,.62);--glass2:rgba(255,255,255,.85);--line:rgba(30,70,140,.16);--text:#0d1626;--dim:#5b6b88;
+  --accent:#0a74ff;--accent2:#c026d3;--front:#0a8cff;--rear:#8b5cf6;--ok:#0aa86b;--warn:#d97706;--bad:#e11d48;--glow:0 6px 18px rgba(10,116,255,.22);
+  --surface:#ffffff;--topbar:rgba(255,255,255,.75);--led-off:#dfe6f2;--wheel:#1d2840;--track:rgba(20,40,80,.09);--car1:#cfe0ff;--car2:#8fb0e8;
+}
+html[data-theme="terang"] body{background:radial-gradient(900px 500px at 85% -10%,rgba(10,116,255,.14),transparent 60%),radial-gradient(700px 500px at -10% 40%,rgba(192,38,211,.08),transparent 60%),var(--bg)}
+html[data-theme="anime"]{
+  --bg:#fff5fa;--glass:rgba(255,255,255,.66);--glass2:rgba(255,255,255,.9);--line:rgba(255,130,175,.32);--text:#4a2c43;--dim:#a07893;
+  --accent:#ff6fa8;--accent2:#9b8cff;--front:#56b6ff;--rear:#b58cff;--ok:#2fc78f;--warn:#ffa24c;--bad:#ff5277;--glow:0 6px 20px rgba(255,111,168,.32);
+  --surface:#ffffff;--topbar:rgba(255,247,251,.82);--led-off:#ffe3ee;--wheel:#5b3a55;--track:rgba(255,111,168,.13);--car1:#ffd1e3;--car2:#ff9cc4;
+  --font:"M PLUS Rounded 1c","Nunito",ui-rounded,system-ui,sans-serif;--disp:"M PLUS Rounded 1c",ui-rounded,system-ui,sans-serif;--mono:"M PLUS Rounded 1c",ui-monospace,monospace;
+  --r:28px;--btn-r:22px;
+}
+html[data-theme="anime"] body{background:radial-gradient(800px 500px at 90% -10%,#ffd6e8,transparent 60%),radial-gradient(700px 500px at -10% 40%,#e6e0ff,transparent 60%),radial-gradient(600px 400px at 50% 110%,#d8f3ff,transparent 60%),var(--bg)}
+html[data-theme="terang"] .topbar,html[data-theme="anime"] .topbar,html[data-theme="terang"] .nav,html[data-theme="anime"] .nav,
+html[data-theme="merah"] .topbar,html[data-theme="merah"] .nav{background:var(--topbar)}
+html[data-theme="terang"] .card,html[data-theme="anime"] .card{box-shadow:0 10px 30px rgba(80,40,90,.10),inset 0 1px 0 #fff}
+html[data-theme="terang"] .wifi-setup input,html[data-theme="anime"] .wifi-setup input{background:#fff}
+html[data-theme="anime"] .bg-grid,html[data-theme="anime"] body::before{background-image:radial-gradient(rgba(255,111,168,.35) 1.2px,transparent 1.4px);background-size:26px 26px}
+
+/* ---------- pemilih tema ---------- */
+.tp{position:relative;display:inline-block;z-index:30}
+.tp-btn{display:inline-grid;place-items:center;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--glass);color:var(--text);cursor:pointer;font-size:1.1rem;transition:.2s}
+.tp-btn:hover{border-color:var(--accent);box-shadow:var(--glow)}
+.tp-btn svg{width:22px;height:22px}
+.tp-menu{position:absolute;right:0;top:48px;min-width:230px;padding:8px;border-radius:18px;border:1px solid var(--line);background:var(--surface);backdrop-filter:blur(16px);
+  box-shadow:0 18px 50px rgba(0,0,0,.35);display:none;animation:tpIn .2s ease}
+.tp.open .tp-menu{display:block}
+@keyframes tpIn{from{opacity:0;transform:translateY(-6px) scale(.97)}}
+.tp-menu small{display:block;color:var(--dim);letter-spacing:.14em;font-size:.62rem;padding:4px 8px}
+.tp-opt{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--text);cursor:pointer;font:inherit;text-align:left}
+.tp-opt:hover{background:var(--glass2)}
+.tp-opt.on{border-color:var(--accent);color:var(--accent)}
+.tp-sw{width:28px;height:28px;border-radius:9px;flex:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4)}
+.tp-row{display:flex;gap:6px;padding:4px}
+.tp-row button{flex:1;padding:7px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font:inherit;font-size:.78rem}
+.tp-row button.on{border-color:var(--accent);color:var(--accent)}
+.tp-float{position:fixed;right:14px;top:calc(12px + env(safe-area-inset-top))}
+
+/* ---------- ikon lucu (khusus anime) ---------- */
+.ico{display:none;width:1.25em;height:1.25em;vertical-align:-.25em}
+.ico svg{width:100%;height:100%;display:block}
+html[data-theme="anime"] .ico{display:inline-block}
+html[data-theme="anime"] .emo{display:none}
+
+/* ---------- gaya anime: besar, bulat, ramah jempol ---------- */
+html[data-theme="anime"] .card{border-radius:var(--r)}
+html[data-theme="anime"] .card::before{background:linear-gradient(130deg,#ff9cc4,transparent 40%,transparent 60%,#b5a8ff);opacity:.8}
+html[data-theme="anime"] .card-head{letter-spacing:.06em;font-size:.82rem;color:#c06590;font-weight:800}
+html[data-theme="anime"] .card-head>span:first-child::after{content:" ✿";color:#ff9cc4}
+html[data-theme="anime"] .tag{background:#fff0f6;border-color:#ffc2d9;color:#e0558f}
+html[data-theme="anime"] .btn,html[data-theme="anime"] .themes button,html[data-theme="anime"] .seg button,html[data-theme="anime"] .toggle,html[data-theme="anime"] .chip{border-radius:var(--btn-r)}
+html[data-theme="anime"] .btn{min-height:50px;padding:12px 18px}
+html[data-theme="anime"] .btn.neon{color:#fff;border:0;background:linear-gradient(135deg,#ff8fbf,#b49cff);box-shadow:0 6px 18px rgba(255,111,168,.4)}
+html[data-theme="anime"] .preset{min-height:110px;border-radius:24px;background:#fff;border:2px solid #ffd3e4;gap:4px}
+html[data-theme="anime"] .preset .ico{width:42px;height:42px}
+html[data-theme="anime"] .preset.active{border-color:var(--accent);background:linear-gradient(180deg,#fff,#ffe8f2);transform:translateY(-3px) scale(1.02)}
+html[data-theme="anime"] .hold{min-height:78px;border-radius:24px;background:#fff;border:2px solid #ffd3e4}
+html[data-theme="anime"] .hold .ico{width:34px;height:34px}
+html[data-theme="anime"] .hud-read b,html[data-theme="anime"] .g-read b{font-weight:800}
+html[data-theme="anime"] .pill{background:#fff}
+html[data-theme="anime"] .info{border-style:solid;background:#fff8fb}
+html[data-theme="anime"] .seg{background:#fff}
+html[data-theme="anime"] .seg button.active{color:#fff}
+html[data-theme="anime"] .logo{color:#fff;border-radius:50%}
+
+/* ---------- sakura ---------- */
+.sakura{position:fixed;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.petal{position:absolute;top:-30px;width:14px;height:11px;border-radius:12px 1px 12px 1px;background:linear-gradient(135deg,#ffd1e3,#ff9cc4);opacity:.85;
+  animation:fall linear infinite,sway ease-in-out infinite alternate}
+@keyframes fall{to{transform:translateY(110vh) rotate(540deg)}}
+@keyframes sway{from{margin-left:-24px}to{margin-left:24px}}
+
+/* ---------- partikel tap ---------- */
+.spark{position:fixed;z-index:60;pointer-events:none;font-size:14px;line-height:1;animation:spark .7s ease-out forwards}
+@keyframes spark{from{opacity:1;transform:translate(0,0) scale(.6)}to{opacity:0;transform:translate(var(--dx),var(--dy)) scale(1.2) rotate(40deg)}}
+
+/* ---------- maskot ---------- */
+.mascot{position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:40;width:96px;height:112px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.mascot svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 6px 10px rgba(200,80,140,.3))}
+.mascot .m-all{transform-origin:60px 138px;animation:mBob 2.4s ease-in-out infinite}
+@keyframes mBob{50%{transform:translateY(-4px)}}
+.mascot .m-eye{transform-box:fill-box;transform-origin:center;animation:mBlink 4.2s infinite}
+@keyframes mBlink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+.mascot .m-happy-eye,.mascot .m-mouth-o,.mascot .m-mouth-w,.mascot .m-sweat,.mascot .m-arms-up{display:none}
+.mascot.happy .m-eye{display:none}.mascot.happy .m-happy-eye{display:inline}
+.mascot.happy .m-mouth-s{display:none}.mascot.happy .m-mouth-o{display:inline}
+.mascot.happy .m-all{animation:mJump .5s ease 2}
+@keyframes mJump{40%{transform:translateY(-14px) scale(1.03,.97)}}
+.mascot.lift .m-arms{display:none}.mascot.lift .m-arms-up{display:inline}
+.mascot.lift .m-all{animation:mLift .8s ease-in-out infinite}
+@keyframes mLift{50%{transform:translateY(-8px) scaleY(1.05)}}
+.mascot.lift .m-mouth-s{display:none}.mascot.lift .m-mouth-o{display:inline}
+.mascot.crouch .m-all{animation:none;transform:translateY(8px) scale(1.06,.86)}
+.mascot.worry .m-sweat{display:inline}.mascot.worry .m-mouth-s{display:none}.mascot.worry .m-mouth-w{display:inline}
+.mascot.wiggle .m-all{animation:mWig .5s ease}
+@keyframes mWig{25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}
+.m-bubble{position:fixed;right:110px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:41;max-width:min(220px,60vw);padding:10px 14px;border-radius:18px 18px 4px 18px;
+  background:#fff;color:#4a2c43;border:2px solid #ffc2d9;box-shadow:0 8px 24px rgba(255,111,168,.25);font-family:var(--font);font-weight:700;font-size:.9rem;
+  opacity:0;transform:translateY(8px) scale(.9);transition:.25s;pointer-events:none}
+.m-bubble.show{opacity:1;transform:none}
+
+/* ---------- onboarding ---------- */
+.ob-card{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:70;width:min(420px,92vw);padding:14px 16px;border-radius:20px;
+  background:var(--surface);border:1px solid var(--accent);box-shadow:var(--glow),0 20px 50px rgba(0,0,0,.35);color:var(--text);font-family:var(--font);animation:tpIn .25s ease}
+.ob-card b{color:var(--accent)} .ob-card p{margin:6px 0 10px}
+.ob-card .ob-row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.ob-card .ob-row span{flex:1;color:var(--dim);font-size:.8rem}
+.ob-card button{padding:9px 14px;border-radius:12px;border:1px solid var(--line);background:var(--glass);color:var(--text);font:inherit;font-weight:700;cursor:pointer}
+.ob-card button.go{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0}
+.ob-focus{outline:3px solid var(--accent)!important;outline-offset:4px;border-radius:14px;animation:obPulse 1.2s infinite}
+@keyframes obPulse{50%{outline-color:transparent}}
+@media (prefers-reduced-motion:reduce){.petal,.spark{display:none}}

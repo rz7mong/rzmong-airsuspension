@@ -10,8 +10,10 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="control.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <script src="theme.js"></script>
 </head>
-<body data-theme="night">
+<body>
   <div class="bg-grid" aria-hidden="true"></div>
   <header class="topbar">
     <a class="brand" href="../" title="Beranda">
@@ -19,14 +21,15 @@
       <span><small>RZMON-G // 2 TITIK</small><b>AIR CONTROL</b></span>
     </a>
     <div class="top-actions">
+      <span data-theme-picker></span>
       <span class="pill" id="status" data-s="demo"><i></i><span id="statusText">DEMO</span></span>
-      <button class="btn neon" id="connect">📡 <span id="connectText">SAMBUNGKAN</span></button>
+      <button class="btn neon" id="connect"><span class="emo">📡</span><i class="ico" data-ico="ble"></i> <span id="connectText">SAMBUNGKAN</span></button>
     </div>
   </header>
   <div class="linkbar" id="linkbar">
     <div class="seg" role="tablist" aria-label="Jalur koneksi">
-      <button role="tab" data-link="ble" id="linkBle">🔵 BLUETOOTH</button>
-      <button role="tab" data-link="wifi" id="linkWifi">📶 WIFI</button>
+      <button role="tab" data-link="ble" id="linkBle"><span class="emo">🔵</span><i class="ico" data-ico="ble"></i> BLUETOOTH</button>
+      <button role="tab" data-link="wifi" id="linkWifi"><span class="emo">📶</span><i class="ico" data-ico="wifi"></i> WIFI</button>
     </div>
     <label class="wifi-host" id="wifiHostBox" hidden>
       <span>IP / host</span>
@@ -38,7 +41,7 @@
   <main class="layout">
     <!-- HUD utama -->
     <section class="card hud" aria-label="HUD">
-      <div class="card-head"><span>🛰️ HUD</span><span class="tag" id="accTag">SPEEDO</span></div>
+      <div class="card-head"><span><span class="emo">🛰️</span><i class="ico" data-ico="hud"></i> HUD</span><span class="tag" id="accTag">SPEEDO</span></div>
       <div class="hud-wrap">
         <svg id="speedo" viewBox="0 0 240 240" role="img" aria-label="Speedometer dan tangki"></svg>
         <div class="hud-read">
@@ -47,16 +50,16 @@
         </div>
       </div>
       <div class="tankbar">
-        <div class="tank-l">🛢️ TANGKI</div>
+        <div class="tank-l"><span class="emo">🛢️</span><i class="ico" data-ico="tank"></i> TANGKI</div>
         <div class="bar"><i id="tankFill"></i><s style="left:72.5%"></s><s style="left:82.5%"></s></div>
         <div class="tank-v"><b id="tankVal">0</b> psi</div>
-        <div class="comp" id="comp">⚙️ KOMPRESOR <span>MATI</span></div>
+        <div class="comp" id="comp"><span class="emo">⚙️</span><i class="ico" data-ico="pump"></i> KOMPRESOR <span class="cst">MATI</span></div>
       </div>
     </section>
 
     <!-- Gauge PSI 2 titik -->
     <section class="card axles" aria-label="Tekanan balon">
-      <div class="card-head"><span>💨 TEKANAN 2 TITIK</span><span class="tag" id="presetTag">JALAN</span></div>
+      <div class="card-head"><span><span class="emo">💨</span><i class="ico" data-ico="bagF"></i> TEKANAN 2 TITIK</span><span class="tag" id="presetTag">JALAN</span></div>
       <div class="gauges">
         <div class="gauge" data-axle="front">
           <svg id="gFront" viewBox="0 0 160 160"></svg>
@@ -74,24 +77,24 @@
 
     <!-- Mobil mengikuti PSI (ilustrasi Grok, dipercantik) -->
     <section class="card carcard" aria-label="Ilustrasi mobil">
-      <div class="card-head"><span>🚗 MOBIL MENGIKUTI PSI</span><span class="tag">LIVE</span></div>
+      <div class="card-head"><span><span class="emo">🚗</span><i class="ico" data-ico="car"></i> MOBIL MENGIKUTI PSI</span><span class="tag">LIVE</span></div>
       <svg id="car" viewBox="0 0 380 190" role="img" aria-label="Mobil naik turun sesuai tekanan"></svg>
     </section>
 
     <!-- Preset & target -->
     <section class="card presets" aria-label="Preset">
-      <div class="card-head"><span>🎚️ PRESET</span><span class="tag">TERSIMPAN DI MODUL</span></div>
+      <div class="card-head"><span><span class="emo">🎚️</span><i class="ico" data-ico="settings"></i> PRESET</span><span class="tag">TERSIMPAN DI MODUL</span></div>
       <div class="preset-row" id="presets">
-        <button class="preset" data-id="0"><span>🅿️</span><b>PARKIR</b><small data-v="0">25/25</small></button>
-        <button class="preset" data-id="1"><span>🛣️</span><b>JALAN</b><small data-v="1">50/55</small></button>
-        <button class="preset" data-id="2"><span>⛰️</span><b>TINGGI</b><small data-v="2">75/80</small></button>
+        <button class="preset" data-id="0"><span><span class="emo">🅿️</span><i class="ico" data-ico="park"></i></span><b>PARKIR</b><small data-v="0">25/25</small></button>
+        <button class="preset" data-id="1"><span><span class="emo">🛣️</span><i class="ico" data-ico="road"></i></span><b>JALAN</b><small data-v="1">50/55</small></button>
+        <button class="preset" data-id="2"><span><span class="emo">⛰️</span><i class="ico" data-ico="high"></i></span><b>TINGGI</b><small data-v="2">75/80</small></button>
       </div>
       <div class="slider">
-        <label for="frontRange">🔵 Target depan <output id="frontOut">50</output> psi</label>
+        <label for="frontRange"><span class="emo">🔵</span><i class="ico" data-ico="bagF"></i> Target depan <output id="frontOut">50</output> psi</label>
         <input id="frontRange" type="range" min="15" max="110" value="50" />
       </div>
       <div class="slider rear">
-        <label for="rearRange">🟣 Target belakang <output id="rearOut">55</output> psi</label>
+        <label for="rearRange"><span class="emo">🟣</span><i class="ico" data-ico="bagR"></i> Target belakang <output id="rearOut">55</output> psi</label>
         <input id="rearRange" type="range" min="15" max="110" value="55" />
       </div>
       <p class="hint">Geser untuk mengubah preset aktif. Batas aman firmware 15–110 psi.</p>
@@ -99,39 +102,39 @@
 
     <!-- Manual -->
     <section class="card manual" aria-label="Manual">
-      <div class="card-head"><span>🕹️ MANUAL</span><span class="tag">TAHAN TOMBOL</span></div>
+      <div class="card-head"><span><span class="emo">🕹️</span><i class="ico" data-ico="up"></i> MANUAL</span><span class="tag">TAHAN TOMBOL</span></div>
       <div class="man-grid">
         <div class="man-col">
           <small>DEPAN</small>
-          <button class="hold up" data-axle="front" data-action="fill">▲<span>ISI</span></button>
-          <button class="hold down" data-axle="front" data-action="dump">▼<span>BUANG</span></button>
+          <button class="hold up" data-axle="front" data-action="fill"><span class="emo">▲</span><i class="ico" data-ico="up"></i><span>ISI</span></button>
+          <button class="hold down" data-axle="front" data-action="dump"><span class="emo">▼</span><i class="ico" data-ico="down"></i><span>BUANG</span></button>
         </div>
         <div class="man-mid">
-          <button class="btn" id="allUp">⬆️ SEMUA NAIK<small>preset Tinggi</small></button>
-          <button class="btn" id="allDown">⬇️ SEMUA TURUN<small>preset Parkir</small></button>
-          <button class="btn danger" id="stop">⏹️ STOP</button>
+          <button class="btn" id="allUp"><span class="emo">⬆️</span><i class="ico" data-ico="up"></i> SEMUA NAIK<small>preset Tinggi</small></button>
+          <button class="btn" id="allDown"><span class="emo">⬇️</span><i class="ico" data-ico="down"></i> SEMUA TURUN<small>preset Parkir</small></button>
+          <button class="btn danger" id="stop"><span class="emo">⏹️</span><i class="ico" data-ico="stop"></i> STOP</button>
         </div>
         <div class="man-col">
           <small>BELAKANG</small>
-          <button class="hold up" data-axle="rear" data-action="fill">▲<span>ISI</span></button>
-          <button class="hold down" data-axle="rear" data-action="dump">▼<span>BUANG</span></button>
+          <button class="hold up" data-axle="rear" data-action="fill"><span class="emo">▲</span><i class="ico" data-ico="up"></i><span>ISI</span></button>
+          <button class="hold down" data-axle="rear" data-action="dump"><span class="emo">▼</span><i class="ico" data-ico="down"></i><span>BUANG</span></button>
         </div>
       </div>
     </section>
 
     <!-- Otomatis & tema -->
     <section class="card auto" aria-label="Otomatis">
-      <div class="card-head"><span>🔑 OTOMATIS & TEMA</span></div>
+      <div class="card-head"><span><span class="emo">🔑</span><i class="ico" data-ico="key"></i> OTOMATIS & TEMA</span></div>
       <button class="toggle" id="rise"><span class="sw"></span><b>Naik saat kontak hidup</b><small>ACC ON → preset Jalan</small></button>
       <button class="toggle" id="drop"><span class="sw"></span><b>Turun saat kontak mati</b><small>ACC OFF → preset Parkir</small></button>
       <div class="themes" id="themes">
-        <button data-theme="day" data-id="0">☀️ SIANG</button>
-        <button data-theme="night" data-id="1">🌙 MALAM</button>
-        <button data-theme="stance" data-id="2">🔥 STANCE</button>
+        <button data-tft="day" data-id="0">☀️ SIANG</button>
+        <button data-tft="night" data-id="1">🌙 MALAM</button>
+        <button data-tft="stance" data-id="2">🔥 STANCE</button>
       </div>
       <p class="hint">Tema dikirim ke layar bulat GC9A01 di modul.</p>
       <details class="wifi-setup">
-        <summary>📶 WiFi modul (opsional)</summary>
+        <summary><span class="emo">📶</span><i class="ico" data-ico="wifi"></i> WiFi modul (opsional)</summary>
         <p class="hint">Modul selalu memancarkan WiFi <code>RZMONG-AIR</code> (192.168.4.1). Isi di bawah agar modul juga ikut router/hotspot (mode STA). Kosongkan SSID untuk mematikan STA.</p>
         <input id="staSsid" placeholder="SSID router / hotspot" autocomplete="off" />
         <input id="staPass" type="password" placeholder="Password" autocomplete="off" />
@@ -141,7 +144,7 @@
 
     <!-- Diagram hardware yang bisa diketuk (fitur Grok) -->
     <section class="card hw" aria-label="Diagram hardware">
-      <div class="card-head"><span>🧰 KETUK HARDWARE</span><span class="tag">INTERAKTIF</span></div>
+      <div class="card-head"><span><span class="emo">🧰</span><i class="ico" data-ico="esp"></i> KETUK HARDWARE</span><span class="tag">INTERAKTIF</span></div>
       <svg id="hw" viewBox="0 0 360 240" role="img" aria-label="Diagram jalur udara"></svg>
       <div class="chips" id="chips"></div>
       <div class="info" id="info"></div>
@@ -149,13 +152,13 @@
 
     <!-- Log protokol -->
     <section class="card logcard" aria-label="Log">
-      <div class="card-head"><span>🧾 LOG PROTOKOL</span>
+      <div class="card-head"><span><span class="emo">🧾</span><i class="ico" data-ico="heart"></i> LOG PROTOKOL</span>
         <span><button class="mini" id="demoToggle">MODE DEMO: ON</button> <button class="mini" id="install" hidden>⤓ PASANG APP</button></span>
       </div>
       <pre class="log" id="log"></pre>
     </section>
   </main>
-  <footer class="foot">RZMON-G Air Suspension · BLE <code>RZM-AIR</code> · <a href="../flash/">⚡ Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
+  <footer class="foot">RZMON-G Air Suspension · BLE <code>RZM-AIR</code> · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
   <script src="app.js"></script>
 </body>
 </html>

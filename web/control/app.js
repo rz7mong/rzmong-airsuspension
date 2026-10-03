@@ -14,7 +14,6 @@
   const TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
   const BAG_MIN = 15, BAG_MAX = 110, DEADBAND = 2, TANK_ON = 145, TANK_OFF = 165;
   const PRESET_NAMES = ["PARKIR", "JALAN", "TINGGI"];
-  const THEMES = ["day", "night", "stance"];
   const NS = "http://www.w3.org/2000/svg";
   const $ = (id) => document.getElementById(id);
   const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
@@ -28,6 +27,10 @@
   const manual = { front: null, rear: null };                  // "fill" | "dump" | null
   let demo = localStorage.getItem("rzm.demo") !== "0";
   let connected = false, part = "esp", dragging = null, lastRxLog = 0, hasSpeed = false;
+
+  /* ---------------- maskot (tema anime) ---------------- */
+  const say = (t, m, ms) => { if (window.RZMTheme) RZMTheme.mascot.say(t, m, ms); };
+  const mood = (m, ms) => { if (window.RZMTheme) RZMTheme.mascot.mood(m, ms); };
 
   /* ---------------- util ---------------- */
   function el(tag, attrs = {}, parent) {
@@ -217,12 +220,13 @@
       connected = true; rxBuf = "";
       setStatus("live", "TERHUBUNG");
       $("connectText").textContent = "PUTUSKAN";
+      say("Tersambung~! Halo modul RZM ♡", "happy", 2400);
       log(`Tersambung ke ${name} (${link === "wifi" ? "WiFi" : isNative ? "BLE aplikasi Android" : "Web Bluetooth"})`);
     } catch (e) {
       connected = false;
       setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
       if (e && e.name === "NotFoundError") log("Pencarian dibatalkan.");
-      else log("Gagal sambung: " + ((e && e.message) || e));
+      else { log("Gagal sambung: " + ((e && e.message) || e)); say("Belum bisa nyambung… cek modulnya ya 🥺", "worry", 2600); }
     }
   }
   function onDisconnect() {
@@ -231,6 +235,7 @@
     $("connectText").textContent = "SAMBUNGKAN";
     setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
     log("Koneksi terputus.");
+    say("Yah, koneksinya putus… 🥺", "worry", 2600);
   }
   function setStatus(s, text) { $("status").dataset.s = s; $("statusText").textContent = text; }
 
@@ -240,7 +245,7 @@
     if (typeof m.preset === "number") state.preset = clamp(m.preset, 0, 2);
     for (const k of ["comp", "rise", "drop", "acc"]) if (typeof m[k] === "boolean") state[k] = m[k];
     if (typeof m.theme === "number") state.theme = clamp(m.theme, 0, 2);
-    if (typeof m.fault === "string") state.fault = m.fault;
+    if (typeof m.fault === "string") { if (m.fault && m.fault !== state.fault) say("Awas! " + m.fault + " 😣", "worry", 3200); state.fault = m.fault; }
     if (typeof m.ip === "string") state.ip = m.ip;
     if (typeof m.speed === "number") hasSpeed = true;
     if (typeof m.pf === "number" && typeof m.pr === "number") {
@@ -299,7 +304,7 @@
     el("feGaussianBlur", { stdDeviation: "3", result: "b" }, f);
     const m = el("feMerge", {}, f); el("feMergeNode", { in: "b" }, m); el("feMergeNode", { in: "SourceGraphic" }, m);
     el("circle", { cx: 120, cy: 120, r: 116, fill: "none", stroke: "var(--line)", "stroke-dasharray": "2 6" }, s);
-    el("path", { d: arcPath(120, 120, 98, A0, A1), fill: "none", stroke: "rgba(255,255,255,.07)", "stroke-width": 12, "stroke-linecap": "round" }, s);
+    el("path", { d: arcPath(120, 120, 98, A0, A1), fill: "none", stroke: "var(--track)", "stroke-width": 12, "stroke-linecap": "round" }, s);
     spdArc = el("path", { d: arcPath(120, 120, 98, A0, A1), fill: "none", stroke: "url(#spdGrad)", "stroke-width": 12, "stroke-linecap": "round", pathLength: 100, "stroke-dasharray": "0 100", filter: "url(#glow)" }, s);
     for (let v = 0; v <= SPD_MAX; v += 10) {
       const a = A0 + (A1 - A0) * v / SPD_MAX, major = v % 40 === 0;
@@ -319,7 +324,7 @@
   const G = {};
   function buildGauge(id, color) {
     const s = $(id), a0 = -130, a1 = 130;
-    el("path", { d: arcPath(80, 80, 66, a0, a1), fill: "none", stroke: "rgba(255,255,255,.07)", "stroke-width": 10, "stroke-linecap": "round" }, s);
+    el("path", { d: arcPath(80, 80, 66, a0, a1), fill: "none", stroke: "var(--track)", "stroke-width": 10, "stroke-linecap": "round" }, s);
     for (let v = 0; v <= 120; v += 10) {
       const a = a0 + (a1 - a0) * v / 120; const [x0, y0] = polar(80, 80, 54, a), [x1, y1] = polar(80, 80, v % 30 ? 57 : 51, a);
       el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "var(--dim)", "stroke-width": v % 30 ? .8 : 1.6 }, s);
@@ -344,8 +349,8 @@
     const s = $("car");
     const defs = el("defs", {}, s);
     const bg = el("linearGradient", { id: "bodyGrad", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-    el("stop", { offset: 0, "stop-color": "color-mix(in srgb,var(--accent) 35%,#0b1a33)" }, bg);
-    el("stop", { offset: 1, "stop-color": "#060c18" }, bg);
+    el("stop", { offset: 0, "stop-color": "var(--car1)" }, bg);
+    el("stop", { offset: 1, "stop-color": "var(--car2)" }, bg);
     CAR.lines = el("g", { opacity: .5 }, s);
     for (let i = 0; i < 6; i++) el("line", { x1: 0, y1: 40 + i * 18, x2: 40, y2: 40 + i * 18, stroke: "var(--accent)", "stroke-width": 1, class: "speedline", "data-i": i }, CAR.lines);
     el("line", { x1: 0, y1: 171, x2: 380, y2: 171, stroke: "var(--line)", "stroke-width": 2 }, s);
@@ -366,7 +371,7 @@
     CAR.wheels = [];
     for (const x of [95, 292]) {
       const w = el("g", {}, s);
-      el("circle", { cx: x, cy: 148, r: 23, fill: "#05070d", stroke: "var(--accent)", "stroke-width": 3 }, w);
+      el("circle", { cx: x, cy: 148, r: 23, fill: "var(--wheel)", stroke: "var(--accent)", "stroke-width": 3 }, w);
       const spokes = el("g", {}, w);
       for (let i = 0; i < 5; i++) { const [sx, sy] = polar(x, 148, 15, i * 72); el("line", { x1: x, y1: 148, x2: sx, y2: sy, stroke: "var(--dim)", "stroke-width": 2 }, spokes); }
       el("circle", { cx: x, cy: 148, r: 4, fill: "var(--accent)" }, w);
@@ -409,7 +414,7 @@
     const s = $("hw");
     const box = (key, x, y, w, h, label, color) => {
       const g = el("g", { class: "hit", "data-part": key }, s);
-      el("rect", { x, y, width: w, height: h, rx: 10, fill: "rgba(10,20,40,.85)", stroke: color, "stroke-width": 1.5 }, g);
+      el("rect", { x, y, width: w, height: h, rx: 10, fill: "var(--surface)", stroke: color, "stroke-width": 1.5 }, g);
       const t = el("text", { x: x + w / 2, y: y + h / 2 + 4, "text-anchor": "middle", fill: "var(--text)", "font-size": 11 }, g); t.textContent = label;
       return g;
     };
@@ -422,22 +427,22 @@
     box("pump", 16, 22, 76, 44, "⚙️ pompa", "var(--dim)");
     HW.pump = s.lastChild.querySelector("rect");
     const tank = el("g", { class: "hit", "data-part": "tank" }, s);
-    el("rect", { x: 122, y: 22, width: 52, height: 76, rx: 18, fill: "rgba(10,20,40,.85)", stroke: "var(--accent)", "stroke-width": 1.5 }, tank);
+    el("rect", { x: 122, y: 22, width: 52, height: 76, rx: 18, fill: "var(--surface)", stroke: "var(--accent)", "stroke-width": 1.5 }, tank);
     HW.tankLvl = el("rect", { x: 126, y: 60, width: 44, height: 34, rx: 14, fill: "var(--accent)", opacity: .25 }, tank);
     HW.tankTxt = el("text", { x: 148, y: 64, "text-anchor": "middle", fill: "var(--text)", "font-size": 11, "font-family": "monospace" }, tank);
     box("esp", 196, 22, 74, 44, "🎛️ ESP32", "var(--accent)");
     HW.ble = el("g", { class: "hit", "data-part": "esp" }, s);
     for (let i = 0; i < 3; i++) el("path", { d: arcPath(233, 22, 6 + i * 5, -40, 40), fill: "none", stroke: "var(--accent)", "stroke-width": 1.5, class: "blewave", style: `animation:pulse 1.2s ${i * .2}s infinite` }, HW.ble);
     box("valve", 288, 22, 60, 44, "", "var(--warn)");
-    HW.leds = ["fillF", "dumpF", "fillR", "dumpR"].map((k, i) => el("circle", { cx: 300 + i * 12, cy: 44, r: 4, fill: "#223", stroke: "var(--warn)" }, s.lastChild));
+    HW.leds = ["fillF", "dumpF", "fillR", "dumpR"].map((k, i) => el("circle", { cx: 300 + i * 12, cy: 44, r: 4, fill: "var(--led-off)", stroke: "var(--warn)" }, s.lastChild));
     const sens = el("g", { class: "hit", "data-part": "sensor" }, s);
-    for (const [x, y] of [[176, 116], [282, 126], [174, 60]]) { el("circle", { cx: x, cy: y, r: 7, fill: "rgba(10,20,40,.95)", stroke: "#3dffa8", "stroke-width": 1.5 }, sens); el("line", { x1: x, y1: y, x2: x + 3, y2: y - 4, stroke: "#3dffa8" }, sens); }
+    for (const [x, y] of [[176, 116], [282, 126], [174, 60]]) { el("circle", { cx: x, cy: y, r: 7, fill: "var(--surface)", stroke: "var(--ok)", "stroke-width": 1.5 }, sens); el("line", { x1: x, y1: y, x2: x + 3, y2: y - 4, stroke: "var(--ok)" }, sens); }
     HW.bags = {};
     for (const [axle, xs, c] of [["front", [60, 130], "var(--front)"], ["rear", [230, 300], "var(--rear)"]]) {
       const g = el("g", { class: "hit", "data-part": axle }, s);
       HW.bags[axle] = xs.map((x) => {
         el("rect", { x: x - 26, y: 214, width: 52, height: 6, rx: 3, fill: "var(--dim)", opacity: .5 }, g);
-        const b = el("rect", { x: x - 22, y: 170, width: 44, height: 44, rx: 18, fill: "rgba(10,20,40,.9)", stroke: c, "stroke-width": 2.5, style: `filter:drop-shadow(0 0 6px ${c})` }, g);
+        const b = el("rect", { x: x - 22, y: 170, width: 44, height: 44, rx: 18, fill: "var(--surface)", stroke: c, "stroke-width": 2.5, style: `filter:drop-shadow(0 0 6px ${c})` }, g);
         const rib = el("line", { x1: x - 20, y1: 192, x2: x + 20, y2: 192, stroke: c, opacity: .5 }, g);
         return { b, rib };
       });
@@ -445,7 +450,9 @@
       HW.bags[axle].label = t;
     }
     s.addEventListener("click", (e) => { const h = e.target.closest(".hit"); if (h) selectPart(h.dataset.part); });
-    $("chips").innerHTML = Object.entries(parts).map(([k, v]) => `<button class="chip" data-part="${k}">${v[0]}</button>`).join("");
+    const ICO = { pump: "pump", tank: "tank", esp: "esp", valve: "valve", sensor: "sensor", front: "bagF", rear: "bagR" };
+    $("chips").innerHTML = Object.entries(parts).map(([k, v]) => { const [emo, ...name] = v[0].split(" "); return `<button class="chip" data-part="${k}"><span class="emo">${emo}</span><i class="ico" data-ico="${ICO[k]}"></i> ${name.join(" ")}</button>`; }).join("");
+    if (window.RZMTheme) RZMTheme.fillIcons($("chips"));
     $("chips").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) selectPart(b.dataset.part); });
     selectPart(part);
   }
@@ -465,7 +472,7 @@
     HW.lineR.classList.toggle("idle", !(v.fillR || v.dumpR));
     HW.lineF.style.animationDirection = v.dumpF ? "reverse" : "normal";
     HW.lineR.style.animationDirection = v.dumpR ? "reverse" : "normal";
-    ["fillF", "dumpF", "fillR", "dumpR"].forEach((k, i) => { HW.leds[i].setAttribute("fill", v[k] ? (k.startsWith("fill") ? "var(--ok)" : "var(--warn)") : "#223"); });
+    ["fillF", "dumpF", "fillR", "dumpR"].forEach((k, i) => { HW.leds[i].setAttribute("fill", v[k] ? (k.startsWith("fill") ? "var(--ok)" : "var(--warn)") : "var(--led-off)"); });
     const lv = clamp(ui.tank / 200, 0, 1) * 68;
     HW.tankLvl.setAttribute("y", (94 - lv).toFixed(1)); HW.tankLvl.setAttribute("height", lv.toFixed(1));
     HW.tankTxt.textContent = Math.round(ui.tank);
@@ -487,16 +494,22 @@
     $("pfVal").textContent = state.pf; $("prVal").textContent = state.pr;
     $("rise").classList.toggle("on", !!state.rise);
     $("drop").classList.toggle("on", !!state.drop);
-    document.body.dataset.theme = THEMES[state.theme] || "night";
     document.querySelectorAll("#themes button").forEach((b) => b.classList.toggle("active", Number(b.dataset.id) === state.theme));
     $("fault").textContent = state.fault ? "⚠️ " + state.fault.toUpperCase() : "";
-    const c = $("comp"); c.classList.toggle("on", !!state.comp); c.querySelector("span").textContent = state.comp ? "HIDUP" : "MATI";
+    const c = $("comp"); c.classList.toggle("on", !!state.comp); c.querySelector(".cst").textContent = state.comp ? "HIDUP" : "MATI";
     $("accTag").textContent = typeof state.acc === "boolean" ? (state.acc ? "🔑 ACC ON" : "🔑 ACC OFF") : "SPEEDO";
     const v = valves();
     for (const [axle, f, d] of [["front", v.fillF, v.dumpF], ["rear", v.fillR, v.dumpR]]) {
       const n = $(axle + "State"); n.className = "g-state" + (f ? " fill" : d ? " dump" : "");
       n.textContent = f ? "▲ MENGISI" : d ? "▼ MEMBUANG" : "● STABIL";
     }
+  }
+
+  function reactPreset(id, p) {
+    const now = (state.front + state.rear) / 2, next = (p.f + p.r) / 2, name = PRESET_NAMES[id].toLowerCase();
+    if (next > now + DEADBAND) say(`Naik ke preset ${id + 1} (${name})~! ⬆️`, "lift", 2800);
+    else if (next < now - DEADBAND) say(`Turun ke preset ${id + 1} (${name}), pelan-pelan ya~`, "crouch", 2800);
+    else say(`Sudah di preset ${name} ✓`, "happy", 1500);
   }
 
   function bindControls() {
@@ -509,7 +522,7 @@
     $("presets").addEventListener("click", (e) => {
       const b = e.target.closest(".preset"); if (!b) return;
       state.preset = Number(b.dataset.id);
-      const p = presetVals[state.preset]; state.pf = p.f; state.pr = p.r;
+      const p = presetVals[state.preset]; reactPreset(state.preset, p); state.pf = p.f; state.pr = p.r;
       send({ cmd: "preset", id: state.preset }); syncControls();
     });
     for (const axle of ["front", "rear"]) {
@@ -522,14 +535,14 @@
     $("rise").onclick = () => { state.rise = !state.rise; send({ cmd: "auto", rise: state.rise, drop: state.drop }); syncControls(); };
     $("drop").onclick = () => { state.drop = !state.drop; send({ cmd: "auto", rise: state.rise, drop: state.drop }); syncControls(); };
     $("themes").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.theme = Number(b.dataset.id); send({ cmd: "theme", id: state.theme }); syncControls(); });
-    const goPreset = (id) => { state.preset = id; const p = presetVals[id]; state.pf = p.f; state.pr = p.r; send({ cmd: "preset", id }); syncControls(); };
+    const goPreset = (id) => { state.preset = id; const p = presetVals[id]; reactPreset(id, p); state.pf = p.f; state.pr = p.r; send({ cmd: "preset", id }); syncControls(); };
     $("allUp").onclick = () => goPreset(2);
     $("allDown").onclick = () => goPreset(0);
-    $("stop").onclick = () => { manual.front = manual.rear = null; send({ cmd: "stop" }); if (navigator.vibrate) navigator.vibrate(60); };
+    $("stop").onclick = () => { manual.front = manual.rear = null; send({ cmd: "stop" }); if (navigator.vibrate) navigator.vibrate(60); say("Semua katup stop! ✋", "worry", 1800); };
     document.querySelectorAll(".hold").forEach((b) => {
       const axle = b.dataset.axle, action = b.dataset.action;
-      const start = (e) => { e.preventDefault(); if (manual[axle] === action) return; manual[axle] = action; b.classList.add("pressed"); if (navigator.vibrate) navigator.vibrate(15); send({ cmd: "manual", axle, action }); };
-      const end = () => { if (manual[axle] !== action) return; manual[axle] = null; b.classList.remove("pressed"); send({ cmd: "manual", axle, action: "stop" }); };
+      const start = (e) => { e.preventDefault(); if (manual[axle] === action) return; manual[axle] = action; b.classList.add("pressed"); mood(action === "fill" ? "lift" : "crouch"); if (navigator.vibrate) navigator.vibrate(15); send({ cmd: "manual", axle, action }); };
+      const end = () => { if (manual[axle] !== action) return; manual[axle] = null; b.classList.remove("pressed"); mood("idle"); send({ cmd: "manual", axle, action: "stop" }); };
       b.addEventListener("pointerdown", start);
       ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => b.addEventListener(ev, end));
       b.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -596,5 +609,14 @@
   log(`Siap. BLE: ${isNative ? "native (Capacitor)" : navigator.bluetooth ? "Web Bluetooth" : "tidak tersedia"} · WiFi: WebSocket/HTTP. Jalur aktif: ${link === "wifi" ? "WiFi" : "Bluetooth"}. ${demo ? "Mode demo aktif." : ""}`);
   syncControls();
   requestAnimationFrame(frame);
+  if (window.RZMTheme) {
+    RZMTheme.fillIcons();
+    setTimeout(() => RZMTheme.onboard("control", [
+      { sel: "#linkbar", title: "1. Pilih jalur", text: "Bluetooth untuk Chrome/aplikasi Android, atau WiFi lewat jaringan <b>RZMONG-AIR</b>." },
+      { sel: "#connect", title: "2. Sambungkan", text: "Tekan Sambungkan. Belum punya modul? Mode demo sudah jalan otomatis." },
+      { sel: "#presets", title: "3. Ketuk preset", text: "Parkir, Jalan, Tinggi — mobil naik/turun sendiri ke target. Tahan ▲/▼ untuk manual." },
+      { sel: ".tp-btn", title: "4. Ganti tema", text: "Coba tema Neon, Cyber Merah, Terang, atau <b>Anime Sakura</b> ✿" },
+    ]), 900);
+  }
   window.RZM = { state, send, applyStatus };   // untuk debug di konsol
 })();
