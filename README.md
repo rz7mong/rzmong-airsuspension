@@ -1,4 +1,4 @@
-# RZMONG Air Suspension
+# RZMONG Airsuspension
 
 Kontroler suspensi udara 2 titik berbasis ESP32. Preset PSI, naik saat kontak hidup, turun saat kontak mati, monitor speedometer, Bluetooth, dan website kontrol.
 

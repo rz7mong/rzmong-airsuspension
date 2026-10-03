@@ -1,4 +1,4 @@
-/* RZMON-G — tema bersama (landing, kontroler, flash, aplikasi Android).
+/* RZMONG Airsuspension — tema bersama (landing, kontroler, flash, aplikasi Android).
    Pilih lewat data-theme di <html>: neon (default) | merah | terang | anime. Disimpan di localStorage "rzm.uitheme". */
 :root,html[data-theme="neon"]{
   --surface:rgba(10,20,40,.88);--topbar:rgba(5,7,13,.6);--led-off:#223;--wheel:#05070d;--track:rgba(255,255,255,.07);
@@ -123,3 +123,46 @@ html[data-theme="anime"] .logo{color:#fff;border-radius:50%}
 .ob-focus{outline:3px solid var(--accent)!important;outline-offset:4px;border-radius:14px;animation:obPulse 1.2s infinite}
 @keyframes obPulse{50%{outline-color:transparent}}
 @media (prefers-reduced-motion:reduce){.petal,.spark{display:none}}
+
+/* ---------- ilustrasi mobil (cars.js) ---------- */
+:root{--cx-road:rgba(255,255,255,.035);--cx-caliper:#e11d2e;--front:#3fb8ff;--rear:#c38bff}
+html[data-theme="terang"]{--cx-road:rgba(20,40,80,.06)}
+html[data-theme="anime"]{--cx-road:rgba(255,111,168,.08);--cx-caliper:#ff6fa8}
+
+.cx-dash{stroke:var(--dim);stroke-width:2;stroke-dasharray:18 22;opacity:.45}
+.cx-dark{fill:#0b0d12}
+.cx-strut{stroke:#0b0d12;stroke-width:3;fill:none;stroke-linecap:round}
+.cx-intake{fill:#07080c;stroke:rgba(255,255,255,.08);stroke-width:.8}
+.cx-rail{stroke:#1a1d24;stroke-width:3.4;fill:none;stroke-linecap:round}
+.cx-chrome{stroke:#cfd5dd;stroke-width:1.6;opacity:.8}
+.cx-slider{stroke:#1b1e25;stroke-width:6;stroke-linecap:round}
+.cx-snorkel{stroke:#111318;stroke-width:5;fill:none;stroke-linecap:round}
+.cx-flare{stroke:#121419;stroke-width:9;fill:none;stroke-linecap:round}
+.cx-lightbar{fill:#fffbe6;filter:drop-shadow(0 0 6px #fff6b0)}
+.cx-head{fill:#fff;stroke:var(--accent);stroke-width:.8}
+.cx-tail{fill:#ff2340;stroke:#ff7788;stroke-width:.6}
+.cx-accent{stroke:var(--accent);stroke-width:1.6;opacity:.85;filter:drop-shadow(0 0 3px var(--accent))}
+.cx-lbl{font:600 12px var(--mono,monospace);letter-spacing:.06em}
+.cx-lf{fill:var(--front)} .cx-lr{fill:var(--rear)}
+.cx-decal{display:none}
+html[data-theme="anime"] .cx-decal{display:inline}
+html[data-theme="terang"] .cx-accent{opacity:.5}
+.cx-picker{display:grid;gap:8px;margin-top:10px}
+.cx-row{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 4px}
+.cx-row::-webkit-scrollbar{display:none}
+.cx-row button{flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:var(--btn-r,12px);border:1px solid var(--line);background:var(--glass);color:var(--text);font:inherit;font-size:.78rem;font-weight:700;letter-spacing:.04em;cursor:pointer;white-space:nowrap;transition:.2s}
+.cx-row button span{font-size:1.05rem}
+.cx-row button.on{border-color:var(--accent);color:var(--accent);box-shadow:var(--glow)}
+.cx-colors button{width:34px;height:34px;padding:0;border-radius:50%;background:var(--sw);border:2px solid rgba(255,255,255,.35)}
+.cx-colors button.on{outline:2px solid var(--accent);outline-offset:2px}
+html[data-theme="anime"] .cx-row button{background:#fff;border:2px solid #ffd3e4}
+.cx-wing{fill:#14161c;stroke:rgba(255,255,255,.18);stroke-width:.8}
+.cx-lip{fill:none;stroke-width:3.2;stroke-linecap:round}
+.cx-lip2{fill:none;stroke:#fff;stroke-opacity:.22;stroke-width:1.2;stroke-linecap:round}
+.cx-beam{opacity:.35;mix-blend-mode:screen}
+.cx-under{opacity:.9;filter:blur(3px)}
+html[data-theme="terang"] .cx-beam,html[data-theme="terang"] .cx-under{display:none}
+html[data-theme="anime"] .cx-under{opacity:.6}
+.cx-strut{stroke:#2b2f39}
+.cx-handle{fill:rgba(255,255,255,.28);stroke:rgba(0,0,0,.35);stroke-width:.5}
+svg.cx{overflow:hidden}

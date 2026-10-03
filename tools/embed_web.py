@@ -18,6 +18,7 @@ FILES = [
     ("/sw.js", "sw.js", "application/javascript"),
     ("/theme.css", "theme.css", "text/css"),
     ("/theme.js", "theme.js", "application/javascript"),
+    ("/cars.js", "cars.js", "application/javascript"),
     ("/icons/icon.svg", "icons/icon.svg", "image/svg+xml"),
     ("/icons/icon-192.png", "icons/icon-192.png", "image/png"),
 ]

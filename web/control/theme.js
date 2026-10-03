@@ -1,4 +1,4 @@
-/* RZMON-G — pengatur tema bersama (landing, kontroler, flash, aplikasi Android).
+/* RZMONG Airsuspension — pengatur tema bersama (landing, kontroler, flash, aplikasi Android).
  * Muat di <head> TANPA defer supaya tema terpasang sebelum halaman tergambar.
  * Tema: neon (default) | merah | terang | anime. API: window.RZMTheme
  */

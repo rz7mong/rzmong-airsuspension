@@ -1,4 +1,4 @@
-# Tutorial rakit RZMON-G Air Suspension
+# Tutorial rakit RZMONG Airsuspension
 
 Target: kontroler 2 titik, tampilan speedometer, tiga preset PSI, naik saat ACC hidup, turun saat ACC mati kalau menu otomatis dinyalakan, plus HP.
 

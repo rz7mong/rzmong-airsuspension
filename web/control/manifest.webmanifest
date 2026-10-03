@@ -1,7 +1,7 @@
 {
-  "name": "RZMON-G Air Control",
-  "short_name": "RZM Air",
-  "description": "Kontroler suspensi udara 2 titik RZMON-G lewat Bluetooth.",
+  "name": "RZMONG Airsuspension",
+  "short_name": "RZMONG Airsuspension",
+  "description": "Kontroler suspensi udara 2 titik RZMONG Airsuspension lewat Bluetooth.",
   "lang": "id",
   "start_url": "./index.html",
   "scope": "./",

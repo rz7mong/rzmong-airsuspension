@@ -1,4 +1,4 @@
-# Protokol kontrol RZMON-G (BLE & WiFi)
+# Protokol kontrol RZMONG Airsuspension (BLE & WiFi)
 
 Perintah dan status **sama persis** di Bluetooth dan WiFi: satu objek JSON per baris, diakhiri `\n`.
 

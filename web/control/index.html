@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#05070d" />
-  <meta name="description" content="Kontroler suspensi udara 2 titik RZMON-G lewat Bluetooth." />
-  <title>RZMON-G // Air Control</title>
+  <meta name="description" content="Kontroler suspensi udara 2 titik RZMONG Airsuspension lewat Bluetooth." />
+  <title>RZMONG Airsuspension — Kontroler</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -18,7 +18,7 @@
   <header class="topbar">
     <a class="brand" href="../" title="Beranda">
       <span class="logo">RZ</span>
-      <span><small>RZMON-G // 2 TITIK</small><b>AIR CONTROL</b></span>
+      <span><small>KONTROLER 2 TITIK</small><b>RZMONG Airsuspension</b></span>
     </a>
     <div class="top-actions">
       <span data-theme-picker></span>
@@ -40,8 +40,8 @@
 
   <main class="layout">
     <!-- HUD utama -->
-    <section class="card hud" aria-label="HUD">
-      <div class="card-head"><span><span class="emo">🛰️</span><i class="ico" data-ico="hud"></i> HUD</span><span class="tag" id="accTag">SPEEDO</span></div>
+    <section class="card hud" id="hudCard" aria-label="HUD">
+      <div class="card-head"><span><span class="emo">🛰️</span><i class="ico" data-ico="hud"></i> HUD</span><span><button class="mini" id="gpsBtn" title="Kecepatan dari GPS HP">📍 GPS</button> <span class="tag" id="accTag">SPEEDO</span></span></div>
       <div class="hud-wrap">
         <svg id="speedo" viewBox="0 0 240 240" role="img" aria-label="Speedometer dan tangki"></svg>
         <div class="hud-read">
@@ -78,7 +78,11 @@
     <!-- Mobil mengikuti PSI (ilustrasi Grok, dipercantik) -->
     <section class="card carcard" aria-label="Ilustrasi mobil">
       <div class="card-head"><span><span class="emo">🚗</span><i class="ico" data-ico="car"></i> MOBIL MENGIKUTI PSI</span><span class="tag">LIVE</span></div>
-      <svg id="car" viewBox="0 0 380 190" role="img" aria-label="Mobil naik turun sesuai tekanan"></svg>
+      <svg id="car" viewBox="0 0 420 190" role="img" aria-label="Mobil naik turun sesuai tekanan"></svg>
+      <details class="car-custom" id="carCustom" open>
+        <summary><span class="emo">🎨</span><i class="ico" data-ico="car"></i> Kustom mobil: model, velg, warna</summary>
+        <div id="carPicker"></div>
+      </details>
     </section>
 
     <!-- Preset & target -->
@@ -127,6 +131,7 @@
       <div class="card-head"><span><span class="emo">🔑</span><i class="ico" data-ico="key"></i> OTOMATIS & TEMA</span></div>
       <button class="toggle" id="rise"><span class="sw"></span><b>Naik saat kontak hidup</b><small>ACC ON → preset Jalan</small></button>
       <button class="toggle" id="drop"><span class="sw"></span><b>Turun saat kontak mati</b><small>ACC OFF → preset Parkir</small></button>
+      <button class="toggle" id="showSpeedo"><span class="sw"></span><b>Tampilkan speedometer</b><small>Sembunyikan HUD &amp; matikan GPS</small></button>
       <div class="themes" id="themes">
         <button data-tft="day" data-id="0">☀️ SIANG</button>
         <button data-tft="night" data-id="1">🌙 MALAM</button>
@@ -158,7 +163,8 @@
       <pre class="log" id="log"></pre>
     </section>
   </main>
-  <footer class="foot">RZMON-G Air Suspension · BLE <code>RZM-AIR</code> · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
+  <footer class="foot">RZMONG Airsuspension · BLE <code>RZM-AIR</code> · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
+  <script src="cars.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -164,3 +164,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
 html,body{overflow-x:clip}
 @media (max-width:440px){ .brand>span:last-child{display:none} .top-actions{gap:6px} .tp-btn{width:38px;height:38px} }
 .hold .emo{font-size:1.6rem;letter-spacing:0;color:inherit}
+.car-custom{margin-top:6px}
+.car-custom summary{cursor:pointer;color:var(--dim);font-size:.8rem;letter-spacing:.08em;padding:6px 0}
+.card[hidden]{display:none!important}
+.mini.on{border-color:var(--ok);color:var(--ok)}

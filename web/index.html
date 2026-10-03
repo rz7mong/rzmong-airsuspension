@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#05070d" />
-  <title>RZMON-G Air Suspension — Kontroler suspensi udara ESP32</title>
+  <title>RZMONG Airsuspension — Kontroler suspensi udara ESP32</title>
   <meta name="description" content="Kontroler suspensi udara 2 titik berbasis ESP32: preset PSI, naik saat kontak hidup, turun saat mati, Bluetooth & WiFi, aplikasi Android." />
   <link rel="icon" href="control/icons/icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="assets/neon.css" />
   <link rel="stylesheet" href="control/theme.css" />
   <script src="control/theme.js"></script>
+  <script src="control/cars.js"></script>
   <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
   <style>
     .hero{display:grid;gap:30px;align-items:center;padding:40px 0 30px;grid-template-columns:1fr}
@@ -22,21 +23,15 @@
     .stats div{border-left:2px solid var(--accent);padding-left:10px}
     .stats b{display:block;font-family:var(--disp);font-size:1.4rem}
     .stats span{color:var(--dim);font-size:.8rem;letter-spacing:.1em}
-    .stage{position:relative;border-radius:28px;overflow:hidden;aspect-ratio:16/10}
-    .stage svg{width:100%;height:100%;display:block}
+    .stage{position:relative;border-radius:28px;overflow:hidden;display:flex;align-items:center;padding:54px 8px 52px!important}
+    .stage svg{width:100%;height:auto;display:block}
+    .hero-picker{padding:12px 14px}
+    .hero-picker .cx-picker{margin:0}
     .hud-chip{position:absolute;padding:6px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);backdrop-filter:blur(8px);font-family:var(--mono);font-size:.75rem}
     .hud-chip b{color:var(--accent)}
     .stage-ctl{position:absolute;left:12px;bottom:12px;display:flex;gap:6px}
     .stage-ctl button{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:6px 10px;font-family:var(--font);font-weight:700;letter-spacing:.1em;cursor:pointer;font-size:.75rem}
     .stage-ctl button.on{border-color:var(--accent);color:var(--accent);box-shadow:var(--glow)}
-    #carBody{transition:transform 1.6s cubic-bezier(.3,1.4,.4,1)}
-    .bagL{transition:all 1.6s cubic-bezier(.3,1.4,.4,1)}
-    .road{animation:road .6s linear infinite}
-    @keyframes road{to{stroke-dashoffset:-60}}
-    .spin{animation:spin .5s linear infinite;transform-box:fill-box;transform-origin:center}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .scan{animation:scan 3.5s ease-in-out infinite}
-    @keyframes scan{0%,100%{transform:translateX(-30%)}50%{transform:translateX(130%)}}
     section{padding:40px 0}
     .grid{display:grid;gap:14px;grid-template-columns:1fr}
     .feat .ico{font-size:1.8rem;width:52px;height:52px;display:grid;place-items:center;border-radius:16px;background:var(--glass2);border:1px solid var(--line);margin-bottom:8px}
@@ -58,7 +53,7 @@
 </head>
 <body>
   <nav class="nav"><div class="wrap">
-    <a class="brand" href="./"><span class="logo">RZ</span>RZMON-G AIR</a>
+    <a class="brand" href="./"><span class="logo">RZ</span>RZMONG Airsuspension</a>
     <div class="nav-links">
       <a class="hide-m" href="#fitur">Fitur</a><a href="control/">Kontroler</a><a href="flash/">Flash</a><a class="hide-m" href="#android">Android</a>
       <a class="hide-m" href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a>
@@ -70,7 +65,7 @@
     <div>
       <div class="kicker">ESP32 · 2 TITIK · BLE + WIFI</div>
       <h1>Suspensi udara,<br><span class="grad">dikendalikan dari HP.</span></h1>
-      <p>RZMON-G adalah kontroler air suspension 2 titik open-source: tiga preset PSI, naik otomatis saat kontak hidup, turun saat mati, monitor tangki &amp; kompresor, layar bulat speedo, plus kontrol lewat Bluetooth atau WiFi.</p>
+      <p>RZMONG Airsuspension adalah kontroler air suspension 2 titik open-source: tiga preset PSI, naik otomatis saat kontak hidup, turun saat mati, monitor tangki &amp; kompresor, layar bulat speedo, plus kontrol lewat Bluetooth atau WiFi.</p>
       <div class="cta">
         <a class="btn primary" href="control/">🕹️ BUKA KONTROLER</a>
         <a class="btn" href="flash/">⚡ FLASH FIRMWARE</a>
@@ -84,44 +79,14 @@
       </div>
     </div>
     <div class="card stage" style="padding:0">
-      <svg viewBox="0 0 640 400" aria-label="Animasi mobil dengan suspensi udara">
-        <defs>
-          <linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent2)"/></linearGradient>
-          <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--car1)"/><stop offset="1" stop-color="var(--car2)"/></linearGradient>
-          <radialGradient id="floor" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></radialGradient>
-          <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        </defs>
-        <g opacity=".25" stroke="var(--accent)">
-          <path d="M0 330 L640 330"/><path d="M0 300 L-200 400 M80 300 L-40 400 M160 300 L120 400 M240 300 L280 400 M320 300 L320 400 M400 300 L360 400 M480 300 L520 400 M560 300 L680 400 M640 300 L840 400"/>
-        </g>
-        <rect class="scan" x="0" y="0" width="120" height="400" fill="url(#lg)" opacity=".06"/>
-        <ellipse cx="320" cy="335" rx="260" ry="26" fill="url(#floor)"/>
-        <line class="road" x1="0" y1="352" x2="640" y2="352" stroke="var(--dim)" stroke-width="3" stroke-dasharray="30 30" opacity=".5"/>
-        <g id="carBody">
-          <path d="M60 262 L64 226 Q68 206 102 202 L222 192 Q276 140 352 136 L446 140 Q500 148 546 192 L600 202 Q624 208 624 234 L620 262 Z" fill="url(#body)" stroke="var(--accent)" stroke-width="3" filter="url(#gl)"/>
-          <path d="M246 194 Q286 152 352 148 L440 152 Q480 158 512 194 Z" fill="rgba(120,220,255,.14)" stroke="var(--accent)" stroke-width="1.5"/>
-          <line x1="372" y1="148" x2="372" y2="194" stroke="var(--accent)" opacity=".5"/>
-          <path d="M78 244 H604" stroke="url(#lg)" stroke-width="3"/>
-          <rect x="600" y="214" width="20" height="9" rx="4" fill="#fff" filter="url(#gl)"/>
-          <rect x="62" y="212" width="12" height="9" rx="4" fill="#ff3b5c" filter="url(#gl)"/>
-          <circle cx="180" cy="270" r="48" fill="var(--wheel)"/><circle cx="480" cy="270" r="48" fill="var(--wheel)"/>
-        </g>
-        <!-- balon (tinggi berubah sesuai preset) -->
-        <rect class="bagL" id="bagR" x="163" y="230" width="34" height="60" rx="12" fill="var(--rear)" filter="url(#gl)" opacity=".9"/>
-        <rect class="bagL" id="bagF" x="463" y="230" width="34" height="60" rx="12" fill="var(--front)" filter="url(#gl)" opacity=".9"/>
-        <g>
-          <circle cx="180" cy="300" r="40" fill="var(--wheel)" stroke="var(--accent)" stroke-width="5"/>
-          <g class="spin"><circle cx="180" cy="300" r="28" fill="none" stroke="var(--dim)" stroke-width="3" stroke-dasharray="14 8"/></g>
-          <circle cx="480" cy="300" r="40" fill="var(--wheel)" stroke="var(--accent)" stroke-width="5"/>
-          <g class="spin"><circle cx="480" cy="300" r="28" fill="none" stroke="var(--dim)" stroke-width="3" stroke-dasharray="14 8"/></g>
-        </g>
-      </svg>
+      <svg id="heroCar" class="hero-car" viewBox="0 0 420 190" role="img" aria-label="Mobil stance naik turun mengikuti preset"></svg>
       <div class="hud-chip" style="left:12px;top:12px">PRESET <b id="hPreset">JALAN</b></div>
       <div class="hud-chip" style="right:12px;top:12px">D <b id="hF">50</b> · B <b id="hR">55</b> psi</div>
       <div class="stage-ctl" id="stageCtl">
         <button data-p="0">🅿️ PARKIR</button><button data-p="1" class="on">🛣️ JALAN</button><button data-p="2">⛰️ TINGGI</button>
       </div>
     </div>
+    <div class="card hero-picker" id="heroPicker" style="grid-column:1/-1"></div>
   </header>
 
   <section class="wrap" id="fitur">
@@ -177,22 +142,26 @@ WiFi: ws://192.168.4.1:81/  ·  GET /api/status  ·  POST /api/cmd</pre>
     <div class="card warn reveal">⚠️ <b>Keselamatan.</b> <span class="dim">Jangan pakai di jalan sebelum preset aman untuk ban, fender, dan rem. Pasang sekering, relief valve tangki, dan relay 40 A untuk kompresor. Preset Parkir untuk foto, bukan untuk dikendarai.</span></div>
   </section>
 
-  <footer>RZMON-G Air Suspension · open-source · <a href="https://github.com/rz7mong/rzmong-airsuspension">github.com/rz7mong/rzmong-airsuspension</a></footer>
+  <footer>RZMONG Airsuspension · open-source · <a href="https://github.com/rz7mong/rzmong-airsuspension">github.com/rz7mong/rzmong-airsuspension</a></footer>
 
   <script>
-    // Animasi mobil: preset → tinggi bodi & balon.
+    // Animasi mobil stance (cars.js): preset → psi depan/belakang → tinggi bodi per sumbu.
     const P = [{n:"PARKIR",f:25,r:25},{n:"JALAN",f:50,r:55},{n:"TINGGI",f:75,r:80}];
-    const lift = (psi) => 26 - (psi - 15) / 95 * 52;
+    const car = RZMCars.mount(document.getElementById("heroCar"), { picker: document.getElementById("heroPicker") });
+    const cur$ = { f: 50, r: 55 }; let tgt = P[1], lastT = performance.now();
     function setP(i){
-      const p = P[i], yf = lift(p.f), yr = lift(p.r);
-      const ang = Math.atan2(yf - yr, 300) * 180 / Math.PI;
-      document.getElementById("carBody").style.transform = `translateY(${(yf+yr)/2}px) rotate(${ang}deg)`;
-      document.getElementById("carBody").style.transformOrigin = "330px 230px";
-      for (const [id, y] of [["bagF", yf], ["bagR", yr]]) { const b = document.getElementById(id); b.setAttribute("y", 230 + y); b.setAttribute("height", 60 - y); }
-      document.getElementById("hPreset").textContent = p.n;
-      document.getElementById("hF").textContent = p.f; document.getElementById("hR").textContent = p.r;
+      tgt = P[i];
+      document.getElementById("hPreset").textContent = tgt.n;
+      document.getElementById("hF").textContent = tgt.f; document.getElementById("hR").textContent = tgt.r;
       document.querySelectorAll("#stageCtl button").forEach((b) => b.classList.toggle("on", Number(b.dataset.p) === i));
     }
+    (function loop(now){
+      const dt = Math.min(.1, (now - lastT) / 1000); lastT = now;
+      // depan bergerak sedikit lebih dulu dari belakang supaya bodi terlihat miring saat naik/turun
+      cur$.f += (tgt.f - cur$.f) * (1 - Math.pow(.02, dt)); cur$.r += (tgt.r - cur$.r) * (1 - Math.pow(.06, dt));
+      car.update(cur$.f, cur$.r, 38, dt);
+      requestAnimationFrame(loop);
+    })(lastT);
     function react(prev, i) {
       if (!window.RZMTheme) return;
       const up = (P[i].f + P[i].r) > (P[prev].f + P[prev].r);

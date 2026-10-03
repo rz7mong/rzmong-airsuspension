@@ -1,4 +1,4 @@
-// Kalibrasi 3 sensor tekanan RZMON-G.
+// Kalibrasi 3 sensor tekanan RZMONG Airsuspension.
 // Tidak menggerakkan solenoid atau kompresor.
 // Board: ESP32 Dev Module. Library: Adafruit ADS1X15.
 //
@@ -118,7 +118,7 @@ void setup() {
   if (!ads.begin()) Serial.println("ADS1115 tidak ditemukan");
   ads.setGain(GAIN_TWOTHIRDS);
   loadCal();
-  Serial.println("Kalibrasi RZMON-G. Ketik p untuk lihat, z untuk nol.");
+  Serial.println("Kalibrasi RZMONG Airsuspension. Ketik p untuk lihat, z untuk nol.");
   printNow();
 }
 

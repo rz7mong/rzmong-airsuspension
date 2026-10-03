@@ -2,7 +2,7 @@
   "name": "rzmong-air-android",
   "version": "0.2.0",
   "private": true,
-  "description": "Aplikasi Android RZMON-G Air Control (Capacitor) — membungkus web/control dengan BLE native + WiFi.",
+  "description": "Aplikasi Android RZMONG Airsuspension (Capacitor) — membungkus web/control dengan BLE native + WiFi.",
   "scripts": {
     "bundle:ble": "esbuild ble-entry.js --bundle --format=esm --minify --outfile=../web/control/vendor/ble-native.js",
     "copy:web": "node scripts/copy-web.mjs",

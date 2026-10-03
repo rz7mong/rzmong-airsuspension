@@ -1,4 +1,4 @@
-# Aplikasi Android RZMON-G Air (Capacitor)
+# Aplikasi Android RZMONG Airsuspension (Capacitor)
 
 Membungkus `web/control` (satu sumber UI) jadi APK. Bluetooth memakai
 `@capacitor-community/bluetooth-le` (BLE native, karena WebView Android tidak punya Web Bluetooth).

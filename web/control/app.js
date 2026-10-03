@@ -1,4 +1,4 @@
-/* RZMON-G Air Control — UI kontroler 2 titik.
+/* RZMONG Airsuspension — UI kontroler 2 titik.
  * Protokol mengikuti firmware/rzmong_airsuspension/rzmong_airsuspension.ino:
  *  - BLE nama "RZM-AIR", service Nordic UART 6e400001-…, RX (tulis) 6e400002-…, TX (notify) 6e400003-…
  *  - Perintah: JSON satu baris diakhiri "\n" → preset | set | auto | theme | manual | stop
@@ -27,6 +27,8 @@
   const manual = { front: null, rear: null };                  // "fill" | "dump" | null
   let demo = localStorage.getItem("rzm.demo") !== "0";
   let connected = false, part = "esp", dragging = null, lastRxLog = 0, hasSpeed = false;
+  let showSpeedo = localStorage.getItem("rzm.speedo") !== "0";
+  const gps = { id: null, speed: null, last: null };
 
   /* ---------------- maskot (tema anime) ---------------- */
   const say = (t, m, ms) => { if (window.RZMTheme) RZMTheme.mascot.say(t, m, ms); };
@@ -83,7 +85,7 @@
   const WebBle = {
     device: null, rx: null,
     async connect(onDisc) {
-      if (!navigator.bluetooth) throw new Error("Browser ini tidak mendukung Web Bluetooth. Pakai Chrome/Edge di Android atau desktop, atau aplikasi Android RZMON-G.");
+      if (!navigator.bluetooth) throw new Error("Browser ini tidak mendukung Web Bluetooth. Pakai Chrome/Edge di Android atau desktop, atau aplikasi Android RZMONG Airsuspension.");
       this.device = await navigator.bluetooth.requestDevice({ filters: [{ name: "RZM-AIR" }, { namePrefix: "RZM" }], optionalServices: [SVC] });
       this.device.addEventListener("gattserverdisconnected", onDisc);
       setStatus("busy", "MENYAMBUNG");
@@ -241,7 +243,8 @@
 
   /* ---------------- status dari modul ---------------- */
   function applyStatus(m) {
-    for (const k of ["tank", "front", "rear", "pf", "pr", "speed"]) if (typeof m[k] === "number") state[k] = m[k];
+    for (const k of ["tank", "front", "rear", "pf", "pr"]) if (typeof m[k] === "number") state[k] = m[k];
+    if (typeof m.speed === "number") state.speed = m.speed;
     if (typeof m.preset === "number") state.preset = clamp(m.preset, 0, 2);
     for (const k of ["comp", "rise", "drop", "acc"]) if (typeof m[k] === "boolean") state[k] = m[k];
     if (typeof m.theme === "number") state.theme = clamp(m.theme, 0, 2);
@@ -277,7 +280,7 @@
     if (state.tank < TANK_ON) state.comp = true;
     if (state.tank > TANK_OFF) state.comp = false;
     if (state.comp) state.tank += 0.3; else state.tank -= 0.004;
-    state.speed = Math.max(0, 45 + 38 * Math.sin(t / 7) + 12 * Math.sin(t / 2.3));
+    if (gps.id === null) state.speed = Math.max(0, 45 + 38 * Math.sin(t / 7) + 12 * Math.sin(t / 2.3));
     state.fault = "";
   }
   function valves() {
@@ -343,61 +346,10 @@
     g.mark.setAttribute("transform", `rotate(${ta.toFixed(1)} 80 80)`);
   }
 
-  /* ---------------- mobil (ilustrasi Grok, versi neon) ---------------- */
-  const CAR = {};
-  function buildCar() {
-    const s = $("car");
-    const defs = el("defs", {}, s);
-    const bg = el("linearGradient", { id: "bodyGrad", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-    el("stop", { offset: 0, "stop-color": "var(--car1)" }, bg);
-    el("stop", { offset: 1, "stop-color": "var(--car2)" }, bg);
-    CAR.lines = el("g", { opacity: .5 }, s);
-    for (let i = 0; i < 6; i++) el("line", { x1: 0, y1: 40 + i * 18, x2: 40, y2: 40 + i * 18, stroke: "var(--accent)", "stroke-width": 1, class: "speedline", "data-i": i }, CAR.lines);
-    el("line", { x1: 0, y1: 171, x2: 380, y2: 171, stroke: "var(--line)", "stroke-width": 2 }, s);
-    CAR.road = el("line", { x1: 0, y1: 176, x2: 380, y2: 176, stroke: "var(--dim)", "stroke-width": 2, "stroke-dasharray": "18 22", opacity: .5 }, s);
-    CAR.body = el("g", {}, s);
-    el("path", { d: "M22 128 L24 106 Q26 94 46 92 L118 86 Q150 56 196 54 L252 56 Q284 60 312 86 L350 92 Q366 96 366 112 L364 128 Z", fill: "url(#bodyGrad)", stroke: "var(--accent)", "stroke-width": 2, style: "filter:drop-shadow(0 0 6px var(--accent))" }, CAR.body);
-    el("path", { d: "M132 88 Q156 64 196 62 L248 64 Q272 68 292 88 Z", fill: "rgba(120,220,255,.12)", stroke: "var(--accent)", "stroke-width": 1, opacity: .8 }, CAR.body);
-    el("line", { x1: 212, y1: 62, x2: 212, y2: 88, stroke: "var(--accent)", opacity: .5 }, CAR.body);
-    el("rect", { x: 352, y: 100, width: 12, height: 6, rx: 3, fill: "#fff", style: "filter:drop-shadow(0 0 6px #fff)" }, CAR.body);
-    el("rect", { x: 22, y: 102, width: 8, height: 6, rx: 3, fill: "var(--bad)", style: "filter:drop-shadow(0 0 6px var(--bad))" }, CAR.body);
-    el("path", { d: "M40 120 H350", stroke: "var(--accent2)", "stroke-width": 1.5, opacity: .7 }, CAR.body);
-    for (const x of [95, 292]) el("circle", { cx: x, cy: 132, r: 30, fill: "var(--bg)", stroke: "var(--line)" }, CAR.body);
-    // balon udara di ruang roda (di atas bodi, di bawah roda)
-    CAR.bags = {};
-    for (const [axle, x, c] of [["rear", 95, "var(--rear)"], ["front", 292, "var(--front)"]]) {
-      CAR.bags[axle] = el("rect", { x: x - 10, y: 100, width: 20, height: 40, rx: 8, fill: c, opacity: .85, style: `filter:drop-shadow(0 0 8px ${c})` }, s);
-    }
-    CAR.wheels = [];
-    for (const x of [95, 292]) {
-      const w = el("g", {}, s);
-      el("circle", { cx: x, cy: 148, r: 23, fill: "var(--wheel)", stroke: "var(--accent)", "stroke-width": 3 }, w);
-      const spokes = el("g", {}, w);
-      for (let i = 0; i < 5; i++) { const [sx, sy] = polar(x, 148, 15, i * 72); el("line", { x1: x, y1: 148, x2: sx, y2: sy, stroke: "var(--dim)", "stroke-width": 2 }, spokes); }
-      el("circle", { cx: x, cy: 148, r: 4, fill: "var(--accent)" }, w);
-      CAR.wheels.push({ g: spokes, x });
-    }
-    CAR.tf = el("text", { x: 292, y: 30, "text-anchor": "middle", fill: "var(--front)", "font-size": 13, "font-family": "monospace" }, s);
-    CAR.tr = el("text", { x: 95, y: 30, "text-anchor": "middle", fill: "var(--rear)", "font-size": 13, "font-family": "monospace" }, s);
-    CAR.rot = 0;
-  }
-  const lift = (psi) => 14 - (clamp(psi, 0, 120) - BAG_MIN) / (BAG_MAX - BAG_MIN) * 28;
-  function drawCar(dt) {
-    const dyF = lift(ui.front), dyR = lift(ui.rear);
-    const ang = Math.atan2(dyF - dyR, 292 - 95) * 180 / Math.PI;
-    CAR.body.setAttribute("transform", `translate(0 ${((dyF + dyR) / 2).toFixed(2)}) rotate(${ang.toFixed(2)} 193 110)`);
-    for (const [axle, dy] of [["front", dyF], ["rear", dyR]]) {
-      const top = 100 + dy, b = CAR.bags[axle];
-      b.setAttribute("y", top.toFixed(1)); b.setAttribute("height", (140 - top).toFixed(1));
-    }
-    CAR.rot = (CAR.rot + ui.speed * dt * 0.9) % 360;
-    for (const w of CAR.wheels) w.g.setAttribute("transform", `rotate(${CAR.rot.toFixed(1)} ${w.x} 148)`);
-    CAR.road.setAttribute("stroke-dashoffset", (-(CAR.rot * 1.2) % 40).toFixed(1));
-    CAR.lines.setAttribute("opacity", clamp(ui.speed / 120, 0, .7).toFixed(2));
-    CAR.lines.querySelectorAll("line").forEach((l, i) => { const x = (((Date.now() / (6 - i * .5)) * (ui.speed / 60)) % 420) - 40; l.setAttribute("x1", 380 - x); l.setAttribute("x2", 420 - x); });
-    CAR.tf.textContent = `DEPAN ${Math.round(ui.front)} psi`;
-    CAR.tr.textContent = `BELAKANG ${Math.round(ui.rear)} psi`;
-  }
+  /* ---------------- mobil stance (cars.js): model, velg, warna; bodi ikut psi depan/belakang ---------------- */
+  let car = null;
+  function buildCar() { if (window.RZMCars) car = RZMCars.mount($("car"), { picker: $("carPicker"), labels: true }); }
+  function drawCar(dt) { if (car) car.update(ui.front, ui.rear, ui.speed, dt); }
 
   /* ---------------- diagram hardware (fitur Grok, diperluas) ---------------- */
   const parts = {
@@ -497,7 +449,9 @@
     document.querySelectorAll("#themes button").forEach((b) => b.classList.toggle("active", Number(b.dataset.id) === state.theme));
     $("fault").textContent = state.fault ? "⚠️ " + state.fault.toUpperCase() : "";
     const c = $("comp"); c.classList.toggle("on", !!state.comp); c.querySelector(".cst").textContent = state.comp ? "HIDUP" : "MATI";
-    $("accTag").textContent = typeof state.acc === "boolean" ? (state.acc ? "🔑 ACC ON" : "🔑 ACC OFF") : "SPEEDO";
+    $("accTag").textContent = typeof state.acc === "boolean" ? (state.acc ? "🔑 ACC ON" : "🔑 ACC OFF") : hasSpeed ? "SPEEDO" : gps.id !== null ? "GPS" : connected ? "SPEEDO" : "DEMO";
+    $("showSpeedo").classList.toggle("on", showSpeedo);
+    $("gpsBtn").classList.toggle("on", gps.id !== null);
     const v = valves();
     for (const [axle, f, d] of [["front", v.fillF, v.dumpF], ["rear", v.fillR, v.dumpR]]) {
       const n = $(axle + "State"); n.className = "g-state" + (f ? " fill" : d ? " dump" : "");
@@ -512,8 +466,42 @@
     else say(`Sudah di preset ${name} ✓`, "happy", 1500);
   }
 
+  /* ---------------- speedometer & GPS (izin lokasi hanya diminta saat tombol GPS diketuk) ---------------- */
+  function startGps() {
+    if (!("geolocation" in navigator)) { log("GPS tidak tersedia di perangkat ini."); return; }
+    if (!window.isSecureContext) { log("GPS butuh HTTPS/aplikasi Android (tidak bisa dari http://192.168.4.1)."); return; }
+    gps.speed = null; gps.last = null;
+    gps.id = navigator.geolocation.watchPosition((pos) => {
+      let v = pos.coords.speed;                                   // m/s, bisa null
+      if ((v === null || isNaN(v)) && gps.last) {
+        const R = 6371000, toR = Math.PI / 180, a = gps.last.coords, b = pos.coords;
+        const dLat = (b.latitude - a.latitude) * toR, dLon = (b.longitude - a.longitude) * toR;
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * toR) * Math.cos(b.latitude * toR) * Math.sin(dLon / 2) ** 2;
+        const dt = (pos.timestamp - gps.last.timestamp) / 1000;
+        v = dt > 0 ? 2 * R * Math.asin(Math.sqrt(h)) / dt : 0;
+      }
+      gps.last = pos; gps.speed = Math.max(0, (v || 0) * 3.6);
+      if (!hasSpeed) state.speed = gps.speed;
+    }, (err) => { log("GPS: " + err.message); stopGps(); }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+    log("GPS aktif — kecepatan dari HP.");
+    say("GPS nyala~ ayo jalan! 🛣️", "happy", 1600);
+  }
+  function stopGps() {
+    if (gps.id !== null) { navigator.geolocation.clearWatch(gps.id); log("GPS dimatikan."); }
+    gps.id = null; gps.speed = null; gps.last = null;
+    if (!hasSpeed && (connected || !demo)) state.speed = 0;
+  }
+  function applySpeedo() {
+    $("hudCard").hidden = !showSpeedo;
+    if (!showSpeedo) stopGps();
+    localStorage.setItem("rzm.speedo", showSpeedo ? "1" : "0");
+  }
+
   function bindControls() {
     $("connect").onclick = connectToggle;
+    $("gpsBtn").onclick = () => { if (gps.id !== null) stopGps(); else startGps(); syncControls(); };
+    $("showSpeedo").onclick = () => { showSpeedo = !showSpeedo; applySpeedo(); syncControls(); };
+    applySpeedo();
     $("linkBle").onclick = () => setLink("ble");
     $("linkWifi").onclick = () => setLink("wifi");
     $("wifiHost").value = savedHost || (servedByModule ? location.host : "192.168.4.1");
@@ -567,9 +555,10 @@
     if (now - lastSim > 50) { simTick(); lastSim = now; }
     const k = 1 - Math.pow(0.001, dt);                 // pelunakan eksponensial
     for (const key of ["tank", "front", "rear", "speed"]) ui[key] += (state[key] - ui[key]) * k;
-    const showSpeed = !connected || hasSpeed;
+    const gpsOn = gps.id !== null && gps.speed !== null;
+    const showSpeed = hasSpeed || gpsOn || (!connected && demo);
     $("speedVal").textContent = showSpeed ? Math.round(ui.speed) : "--";
-    $("speedNote").textContent = showSpeed ? "" : "firmware belum mengirim data kecepatan";
+    $("speedNote").textContent = showSpeed ? "" : gps.id !== null ? "menunggu sinyal GPS…" : "ketuk 📍 GPS untuk kecepatan dari HP";
     const sp = showSpeed ? clamp(ui.speed / SPD_MAX, 0, 1) : 0;
     spdArc.setAttribute("stroke-dasharray", `${(sp * 100).toFixed(2)} 100`);
     needle.setAttribute("transform", `rotate(${(A0 + (A1 - A0) * sp).toFixed(2)} 120 120)`);
