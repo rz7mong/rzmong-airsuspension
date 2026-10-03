@@ -12,6 +12,7 @@ Sistem ini mengontrol tekanan, bukan tinggi mobil. Depan kiri dan kanan satu sal
 - `docs/WIRING.md` — pin dan jalur udara
 - `firmware/` — sketsa Arduino ESP32
 - `docs/PROTOKOL.md` — protokol BLE & WiFi (perintah, status, endpoint)
+- `docs/EDIT-GUIDE.md` — **panduan edit & build sendiri** (tema, maskot, mobil pixel, firmware, APK, Pages, release)
 - `web/index.html` — landing page
 - `web/flash/` — halaman flash lewat browser (ESP Web Tools + serial monitor), `.bin` di `web/flash/firmware/`
 - `web/control/` — website kontrol (PWA), BLE atau WiFi, juga dibungkus jadi aplikasi Android

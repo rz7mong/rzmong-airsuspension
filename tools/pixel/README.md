@@ -8,3 +8,5 @@
 - `pix.py`: rasterisasi ke grid palet terindeks (1-5 = cat yang bisa ditukar warna, 6+ = kaca/trim/lampu tetap),
   outline, rim light, lengkung spatbor (ring gelap + bibir terang) dan lapisan ruang roda terpisah.
 - Velg, latar, livery, dan animasi digambar per piksel di `web/control/cars.js`.
+- `preview.html`: pratinjau sprite di browser (jalankan `python3 -m http.server` dari root repo, lalu buka `/tools/pixel/preview.html?m=kaze,ronin`).
+- Panduan lengkap: `docs/EDIT-GUIDE.md`.

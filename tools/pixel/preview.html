@@ -1,0 +1,14 @@
+<!doctype html><html data-theme="neon"><head><meta charset="utf-8"><link rel="stylesheet" href="../../web/control/control.css"><link rel="stylesheet" href="../../web/control/theme.css">
+<style>body{padding:8px;background:#05060a;margin:0} .g{display:grid;grid-template-columns:repeat(var(--cols,2),1fr);gap:8px} .cell{width:100%}</style></head>
+<body><div class="g" id="g"></div><script src="../../web/control/cars-pixel.js"></script><script src="../../web/control/cars.js"></script><script>
+// Pratinjau sprite: python3 -m http.server (dari root repo) lalu buka /tools/pixel/preview.html?m=kaze,ronin&p=15,110&w=chrome&l=pin&theme=anime&cols=2
+const q=new URLSearchParams(location.search); const saved=localStorage.getItem("rzm.car");
+if(q.get('theme'))document.documentElement.setAttribute('data-theme',q.get('theme'));
+const models=(q.get('m')||'kaze').split(','); const ps=(q.get('p')||'15,110').split(',').map(Number);
+document.getElementById('g').style.setProperty('--cols',q.get('cols')||ps.length);
+for(const m of models){for(const psi of ps){
+ localStorage.setItem('rzm.car',JSON.stringify({model:m,wheel:q.get('w')||'',color:q.has('c')?q.get('c'):'',livery:q.get('l')||'',view:q.get('v')||''}));
+ const d=document.createElement('div');d.className='cell';const s=document.createElement('div');d.appendChild(s);document.getElementById('g').appendChild(d);
+ const c=RZMCars.mount(s,{labels:true});c.update(psi,q.get('pr')?+q.get('pr'):psi,q.get('spd')?+q.get('spd'):0,0);}}
+if(saved===null)localStorage.removeItem("rzm.car");else localStorage.setItem("rzm.car",saved);
+</script></body></html>
