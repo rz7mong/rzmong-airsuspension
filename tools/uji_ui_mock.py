@@ -31,7 +31,7 @@ try:
       errs = []
       pg.on("pageerror", lambda e: errs.append(str(e)))
       pg.on("console", lambda m: errs.append(m.text) if m.type == "error" and "ws://" not in m.text and "WebSocket" not in m.text and "Failed to load resource" not in m.text else None)
-      pg.goto(f"http://127.0.0.1:{WEB_PORT}/control/")
+      pg.goto(f"http://127.0.0.1:{WEB_PORT}/control/?layout=classic")   # tata letak klasik; dashboard diuji di tools/uji_ui_dash.py
       pg.wait_for_timeout(800)
       # tutup tur/onboarding kalau ada
       for sel in ["text=Lewati", "text=Tutup", "text=Mulai"]:
