@@ -1,5 +1,5 @@
 /* Service worker sederhana: cache-first untuk aset kontroler supaya bisa dibuka offline. */
-const CACHE = "rzm-control-v9";
+const CACHE = "rzm-control-v10";
 const ASSETS = ["./", "./index.html", "./control.css", "./app.js", "./theme.css", "./theme.js", "./cars-pixel.js", "./cars.js", "./remote.js", "./dash.js", "./manifest.webmanifest", "./icons/icon.svg", "./icons/icon-192.png", "./icons/icon-512.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {

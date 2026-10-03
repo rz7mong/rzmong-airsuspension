@@ -34,7 +34,7 @@ Dengan remote internet, dashboard di **website** (`https://rz7mong.github.io/rzm
 - Semua kerja jaringan (DNS, TLS, reconnect dengan jeda 2→60 detik) jalan di task terpisah. **Loop katup tidak pernah menunggu internet.**
 - Topik per perangkat: `rzm/<id>/…`. `<id>` = MAC modul + 8 hex acak, contoh `a1b2c3d4e5f6-9f3e21c0` (lihat kartu **REMOTE INTERNET**).
 - Setiap perintah ditandatangani **HMAC-SHA256** dengan kode akses. **Kode akses tidak pernah dikirim** ke broker.
-  Ada nonce per koneksi + nomor urut, jadi pesan lama tidak bisa diputar ulang. Salah tanda tangan 5× → modul menolak 30 detik (sama seperti lokal).
+  Ada nonce per koneksi + nomor urut, jadi pesan lama tidak bisa diputar ulang. Salah tanda tangan dihitung **per HP/browser** (id klien acak `c` yang disimpan di HP): 5× → HP itu ditolak 30 detik, lalu makin lama (maks 15 menit), aturan sama dengan lokal. Kolam hitungan remote terpisah dari Bluetooth/WiFi lokal, jadi penebak lewat internet tidak bisa mengunci kamu di mobil. STOP tetap selalu diterima, dan STOP tersimpan di flash: setelah modul restart leveling tetap berhenti sampai preset dipilih.
 - Telemetri (tekanan, tangki, preset, kontak, kompresor) dikirim *retained*. Kalau ada HP yang sedang membuka dashboard: maks 1×/detik.
   Tanpa penonton: hanya kalau berubah, maks 1× per 30 detik, plus detak tiap 5 menit. Status `online` memakai Last Will (`0` kalau modul putus).
 - Host, username, dan sandi broker disimpan di NVS (namespace `rzmrm`) dan **tidak pernah** dikirim balik di status.

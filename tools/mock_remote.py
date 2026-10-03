@@ -39,7 +39,7 @@ S = {"tank": 158.0, "front": 32.0, "rear": 30.0, "preset": 1, "comp": False, "ri
      "fault": a.fault, "acc": True, "hold": False}
 presets = [[25, 25], [50, 55], [75, 80]]
 lock = threading.Lock()
-auth = {"fails": 0, "lock_until": 0.0}
+clients = {}   # id klien remote → hitungan salah kode
 sess = {"nonce": "", "lastq": 0, "live_until": 0.0, "force": True}
 base = f"rzm/{a.id}/"
 T = {k: base + k for k in ("status", "online", "cmd", "evt")}
@@ -52,9 +52,6 @@ def status():
              "comp": S["comp"], "rise": S["rise"], "drop": S["drop"], "theme": S["theme"], "pf": presets[S["preset"]][0],
              "pr": presets[S["preset"]][1], "fault": S["fault"] or ("STOP: pilih preset" if S["hold"] else ""), "acc": S["acc"], "rm": 3}
         if S["hold"]: d["hold"] = True   # firmware ≥0.3.1: STOP menahan leveling sampai preset/target dipilih
-    lock_left = auth["lock_until"] - time.time()
-    if lock_left > 0:
-        d["lock"] = int(lock_left) + 1
     d.update({"n": sess["nonce"], "q": sess["lastq"], "fw": "0.4.0-mock", "sta": True})
     return d
 
@@ -102,16 +99,18 @@ def on_message(cl, _ud, msg):
     rid = d.get("r", "")
     if d.get("n") != sess["nonce"] or int(d.get("q", 0)) <= sess["lastq"]:
         return event(cl, "stale", rid)
-    if auth["lock_until"] > time.time():
+    # seperti firmware ≥0.4.0: salah kode dihitung PER id klien "c"; 5x → 30 dtk, lalu tiap salah 2× lebih lama (maks 15 mnt)
+    sl = clients.setdefault(str(d.get("c", ""))[:24], {"fails": 0, "level": 0, "until": 0.0})
+    if sl["until"] > time.time():
         return event(cl, "locked", rid)
     want = hmac.new(a.code.encode(), body.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(want, sig):
-        auth["fails"] += 1
-        if auth["fails"] >= 5:
-            auth["fails"] = 0; auth["lock_until"] = time.time() + 30
+        sl["fails"] += 1
+        if sl["fails"] >= 5 or sl["level"] > 0:
+            sl["until"] = time.time() + min(30 * 2 ** min(sl["level"], 5), 900); sl["fails"] = 0; sl["level"] += 1
             return event(cl, "locked", rid)
         return event(cl, "bad_code", rid)
-    auth["fails"] = 0; sess["lastq"] = int(d["q"]); sess["live_until"] = time.time() + 60; sess["force"] = True
+    sl.update(fails=0, level=0); sess["lastq"] = int(d["q"]); sess["live_until"] = time.time() + 60; sess["force"] = True
     c = d.get("cmd", "")
     print(f"perintah OK: {body}", flush=True)
     if c in ("security", "wifi", "remote", "rinfo"): return event(cl, "local_only", rid)

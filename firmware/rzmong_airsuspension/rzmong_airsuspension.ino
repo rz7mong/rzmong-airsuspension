@@ -75,8 +75,17 @@
 // Default dipakai saat pertama kali flash atau setelah reset kredensial (tahan tombol BOOT).
 #define ACCESS_CODE_DEFAULT "1234"   // kode akses UI/API (4–12 karakter)
 #define BT_PIN_DEFAULT 123456        // PIN pairing Bluetooth (6 digit, passkey BLE)
-#define AUTH_MAX_FAIL 5              // salah kode berturut-turut sebelum dikunci
-#define AUTH_LOCK_MS 30000           // lama kunci setelah terlalu banyak salah
+#define AUTH_MAX_FAIL 5              // salah kode berturut-turut (per klien) sebelum dikunci
+#define AUTH_LOCK_MS 30000           // kunci pertama; tiap kunci berikutnya 2× lebih lama
+#define AUTH_LOCK_MAX_MS 900000UL    // kunci terlama 15 menit
+#define AUTH_DECAY_MS 900000UL       // 15 menit tanpa salah → hitungan klien itu kembali nol
+#define AUTH_SLOTS 9                 // slot 0 = Bluetooth, 1..8 = alamat IP klien WiFi (HTTP + WebSocket)
+#define KEY_BLE 0xFFFFFFFFu          // kunci slot Bluetooth (bukan alamat IP yang mungkin)
+// Remote internet (0.4.0+): klien web/app dibedakan per "c" (id klien acak yang disimpan di HP) dan punya
+// kolam slot SENDIRI → penebak lewat internet tidak bisa mengunci pemilik di Bluetooth/WiFi lokal, dan sebaliknya.
+// Kunci remote = 0xFE00xx00: sebagai IPv4 (byte rendah = oktet pertama di ESP32) berarti 0.x.x.254 → mustahil jadi IP klien.
+#define RM_AUTH_SLOTS 4
+#define KEY_RM_ANON 0xFE000000u
 // Tombol BOOT papan ESP32 DevKit (esp32dev) = GPIO0, aktif-low. ESP32-C3 = GPIO9 (ubah kalau ganti papan).
 // Hanya dibaca saat firmware sudah jalan; menahan BOOT ketika dinyalakan tetap masuk mode download.
 #define PIN_BOOT 0
@@ -152,18 +161,21 @@ String staSsid, staPass, apPass;
 Preferences secPrefs;
 String accessCode = ACCESS_CODE_DEFAULT;
 uint32_t btPin = BT_PIN_DEFAULT;
-uint8_t authFails = 0;
-uint32_t authLockUntil = 0;
+// Proteksi tebak kode PER KLIEN: Bluetooth punya slot sendiri, klien WiFi dibedakan per alamat IP (HTTP dan
+// WebSocket dari IP yang sama berbagi slot, jadi ganti jalur / sambung ulang tidak mereset hitungan).
+// Penyerang di WiFi hanya mengunci dirinya sendiri, tidak bisa mengunci pemilik di Bluetooth atau IP lain.
+struct AuthSlot { uint32_t key; bool used; uint8_t fails; uint8_t level; uint32_t lockUntil; uint32_t lastFail; };
+AuthSlot authSlots[AUTH_SLOTS + RM_AUTH_SLOTS];   // [0] BLE · [1..8] IP WiFi · [9..12] klien remote
 uint32_t apRestartAt = 0;        // >0 → SoftAP dinyalakan ulang dengan sandi baru pada millis() ini
 uint32_t bootHoldMs = 0;         // lama tombol BOOT ditahan (untuk layar)
 uint32_t resetNoticeUntil = 0;   // tampilkan "KREDENSIAL DIRESET" di layar sampai waktu ini
 
 // Satu sesi per koneksi: BLE (satu HP), tiap klien WebSocket, dan tiap request HTTP.
-struct Session { bool authed; const char *ev; bool info; };  // info → kirim id remote sekali
-Session bleSession = {false, nullptr, false};
+struct Session { bool authed; const char *ev; uint32_t key; bool info; };  // key = KEY_BLE / alamat IP / KEY_REMOTE…; info → kirim id remote sekali
+Session bleSession = {false, nullptr, KEY_BLE, false};
 #define WS_SLOTS 8
 Session wsSession[WS_SLOTS];
-Session rmSession = {true, nullptr, false};   // perintah remote internet (sudah lolos HMAC per pesan)
+Session rmSession = {true, nullptr, KEY_RM_ANON, false};   // perintah remote internet (sudah lolos HMAC per pesan)
 
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
@@ -279,12 +291,22 @@ void allValvesOff() {
   setValve(PIN_DUMP_R, false);
 }
 
+// Tulis ke flash hanya kalau nilainya berubah (mengurangi keausan flash saat slider/preset sering dipakai).
 void savePrefs() {
-  prefs.putBytes("presets", presets, sizeof(presets));
-  prefs.putInt("preset", activePreset);
-  prefs.putBool("rise", riseOnStart);
-  prefs.putBool("drop", dropOnStop);
-  prefs.putInt("theme", theme);
+  Preset old[3];
+  if (prefs.getBytes("presets", old, sizeof(old)) != sizeof(old) || memcmp(old, presets, sizeof(old)))
+    prefs.putBytes("presets", presets, sizeof(presets));
+  if (prefs.getInt("preset", -1) != activePreset) prefs.putInt("preset", activePreset);
+  if (!prefs.isKey("rise") || prefs.getBool("rise") != riseOnStart) prefs.putBool("rise", riseOnStart);
+  if (!prefs.isKey("drop") || prefs.getBool("drop") != dropOnStop) prefs.putBool("drop", dropOnStop);
+  if (prefs.getInt("theme", -1) != theme) prefs.putInt("theme", theme);
+}
+
+// STOP disimpan di flash: setelah restart / watchdog, leveling tetap berhenti sampai preset dipilih.
+void setHold(bool h) {
+  if (levelHold == h) return;
+  levelHold = h;
+  prefs.putBool("hold", h);   // hanya saat berubah
 }
 
 void loadPrefs() {
@@ -294,6 +316,8 @@ void loadPrefs() {
   riseOnStart = prefs.getBool("rise", true);
   dropOnStop = prefs.getBool("drop", false);
   theme = constrain(prefs.getInt("theme", 1), 0, 2);
+  levelHold = prefs.getBool("hold", false);
+  if (levelHold) Serial.println("STOP masih aktif dari sebelum restart — pilih preset untuk melanjutkan leveling");
   for (Preset &p : presets) { p.front = constrain(p.front, BAG_MIN, BAG_MAX); p.rear = constrain(p.rear, BAG_MIN, BAG_MAX); }
 }
 
@@ -368,7 +392,7 @@ void updateFault() {
 
 // Preset dipilih / target diubah → lanjutkan leveling dan buka kunci fault (coba lagi).
 void resumeLeveling() {
-  levelHold = false;
+  setHold(false);
   axF.latched = axR.latched = nullptr;
   compFault = false;
 }
@@ -454,8 +478,7 @@ void factoryResetCredentials() {
   accessCode = ACCESS_CODE_DEFAULT;
   btPin = BT_PIN_DEFAULT;
   apPass = AP_PASS_DEFAULT;
-  authFails = 0;
-  authLockUntil = 0;
+  memset(authSlots, 0, sizeof(authSlots));
   applyBtPin();
   clearBleBonds();
   logoutAll();
@@ -469,22 +492,72 @@ void factoryResetCredentials() {
   Serial.println("Kalibrasi & preset tetap. Di HP: lupakan/unpair RZM-AIR lalu pairing ulang.");
 }
 
-uint32_t lockLeftMs() {
-  if (!authLockUntil) return 0;
-  int32_t left = (int32_t)(authLockUntil - millis());
-  if (left <= 0) { authLockUntil = 0; return 0; }
+// Slot WiFi boleh dipakai ulang hanya kalau bersih, atau sudah lama tidak salah dan tidak sedang dikunci,
+// supaya penyerang tidak bisa menghapus hukumannya dengan berganti-ganti IP.
+bool slotIdle(const AuthSlot &a, uint32_t now) {
+  if (!a.used || (a.fails == 0 && a.level == 0)) return true;
+  return (a.lockUntil == 0 || (int32_t)(a.lockUntil - now) <= 0) && (int32_t)(now - a.lastFail) > (int32_t)AUTH_DECAY_MS;
+}
+
+bool isRemoteKey(uint32_t key) { return (key & 0xFF0000FFu) == KEY_RM_ANON; }
+// Kolam slot: WiFi [1, AUTH_SLOTS), remote [AUTH_SLOTS, AUTH_SLOTS + RM_AUTH_SLOTS).
+int slotLo(uint32_t key) { return isRemoteKey(key) ? AUTH_SLOTS : 1; }
+int slotHi(uint32_t key) { return isRemoteKey(key) ? AUTH_SLOTS + RM_AUTH_SLOTS : AUTH_SLOTS; }
+
+// Cari slot klien. create=true → ambil slot idle kalau belum ada. nullptr = tidak ada / tabel penuh oleh klien yang dihukum.
+AuthSlot *authSlot(uint32_t key, bool create) {
+  if (key == KEY_BLE) { authSlots[0].key = KEY_BLE; authSlots[0].used = true; return &authSlots[0]; }
+  uint32_t now = millis();
+  AuthSlot *idle = nullptr;
+  for (int i = slotLo(key); i < slotHi(key); i++) {
+    AuthSlot &a = authSlots[i];
+    if (a.used && a.key == key) return &a;
+    if (!idle && slotIdle(a, now)) idle = &a;
+  }
+  if (!create || !idle) return nullptr;
+  *idle = {key, true, 0, 0, 0, 0};
+  return idle;
+}
+
+uint32_t slotLockLeft(AuthSlot *a) {
+  if (!a || !a->lockUntil) return 0;
+  int32_t left = (int32_t)(a->lockUntil - millis());
+  if (left <= 0) { a->lockUntil = 0; return 0; }
   return left;
 }
 
-// Cek kode; hitung salah untuk proteksi tebak-tebakan.
-bool checkCode(const char *code, Session &s) {
-  if (lockLeftMs()) { s.ev = "locked"; return false; }
-  if (sameSecret(accessCode, code)) { authFails = 0; return true; }
-  if (++authFails >= AUTH_MAX_FAIL) {
-    authFails = 0;
-    authLockUntil = deadlineIn(AUTH_LOCK_MS);
+// Sisa kunci (ms) untuk klien ini. Kalau tabel penuh oleh klien yang dihukum, klien WiFi baru dianggap terkunci.
+uint32_t lockLeftMs(uint32_t key) {
+  AuthSlot *a = authSlot(key, false);
+  if (a) return slotLockLeft(a);
+  uint32_t now = millis();
+  for (int i = slotLo(key); i < slotHi(key); i++) if (slotIdle(authSlots[i], now)) return 0;
+  return AUTH_LOCK_MS;
+}
+
+// Cek kode; hitung salah per klien. Setelah dikunci sekali, tiap salah berikutnya (dalam 15 menit) langsung
+// mengunci lagi 2× lebih lama: 30 dtk, 1, 2, 4, 8, lalu maks 15 menit.
+bool authVerdict(Session &s, bool good);
+bool checkCode(const char *code, Session &s) { return authVerdict(s, sameSecret(accessCode, code)); }
+// Inti hitung salah per klien; dipakai kode akses lokal DAN tanda tangan HMAC remote (good = tanda tangan cocok).
+bool authVerdict(Session &s, bool good) {
+  AuthSlot *a = authSlot(s.key, true);
+  if (!a) { s.ev = "locked"; return false; }
+  uint32_t now = millis();
+  if (slotLockLeft(a)) { s.ev = "locked"; return false; }
+  // lastFail = saat salah terakhir, atau akhir kunci terakhir (bisa di masa depan) → peluruhan dihitung dari situ.
+  if (a->lastFail && (int32_t)(now - a->lastFail) > (int32_t)AUTH_DECAY_MS) { a->fails = 0; a->level = 0; }
+  if (good) { a->fails = 0; a->level = 0; a->lastFail = 0; return true; }
+  a->lastFail = now ? now : 1;
+  if (++a->fails >= AUTH_MAX_FAIL || a->level > 0) {
+    uint32_t dur = AUTH_LOCK_MS << (a->level < 5 ? a->level : 5);
+    if (dur > AUTH_LOCK_MAX_MS) dur = AUTH_LOCK_MAX_MS;
+    a->fails = 0;
+    if (a->level < 10) a->level++;
+    a->lockUntil = deadlineIn(dur);
+    a->lastFail = a->lockUntil;
     s.ev = "locked";
-    Serial.println("Akses: terlalu banyak kode salah, dikunci 30 detik");
+    Serial.printf("Akses: kode salah berulang dari %s, dikunci %u dtk\n", s.key == KEY_BLE ? "Bluetooth" : isRemoteKey(s.key) ? "internet" : "WiFi", (unsigned)(dur / 1000));
   } else s.ev = "bad_code";
   return false;
 }
@@ -553,7 +626,7 @@ void handleLine(const String &line, Session &s) {
     if (checkCode(doc["code"], s)) s.authed = true;
     else return;
   }
-  if (!s.authed && strcmp(cmd, "stop")) { s.ev = lockLeftMs() ? "locked" : "need_auth"; return; }
+  if (!s.authed && strcmp(cmd, "stop")) { s.ev = lockLeftMs(s.key) ? "locked" : "need_auth"; return; }
   if (!strcmp(cmd, "rinfo")) { s.info = true; return; }   // minta id perangkat remote (sesi lokal terbuka)
   if (!strcmp(cmd, "preset")) {
     int id = doc["id"] | 1;
@@ -586,7 +659,7 @@ void handleLine(const String &line, Session &s) {
     // Keselamatan: tutup semua katup DAN hentikan leveling otomatis sampai preset dipilih lagi.
     cancelManual();
     allValvesOff();
-    levelHold = true;
+    setHold(true);
     axF.filling = axF.dumping = axR.filling = axR.dumping = false;
     Serial.println("STOP: semua katup tutup, leveling otomatis berhenti sampai preset dipilih");
     return;
@@ -594,14 +667,20 @@ void handleLine(const String &line, Session &s) {
     // {"cmd":"wifi","ssid":"Router","pass":"rahasia"} → sambung ke router (STA). ssid kosong = matikan STA.
     // {"cmd":"wifi","appass":"minimal8"} → ganti password SoftAP (berlaku setelah restart).
     if (doc["ssid"].is<const char *>()) {
-      staSsid = (const char *)doc["ssid"];
-      staPass = doc["pass"] | "";
+      String ssid = (const char *)doc["ssid"], pass = doc["pass"] | "";
+      // Batas WiFi: SSID ≤32 byte, sandi kosong (jaringan terbuka) atau 8–63 karakter.
+      if (ssid.length() > 32 || (pass.length() && (pass.length() < 8 || pass.length() > 63))) { s.ev = "bad_input"; return; }
+      staSsid = ssid;
+      staPass = pass;
       prefs.putString("ssid", staSsid);
       prefs.putString("spass", staPass);
       applyWifiSta();
     }
     if (doc["appass"].is<const char *>()) {
       // Kompatibel dengan UI lama; sekarang disimpan di "rzmsec" dan langsung diterapkan.
+      // Sama seperti "security": wajib membawa kode akses saat ini, walau sesi sudah login.
+      if (!doc["code"].is<const char *>()) { s.ev = "bad_code"; return; }
+      if (!checkCode(doc["code"], s)) return;
       String p = (const char *)doc["appass"];
       if (validApPass(p)) {
         apPass = p;
@@ -626,7 +705,7 @@ void pollBle() {
     bleRxShared = "";
   }
   if (evt) {               // HP baru tersambung / putus → sesi terkunci lagi, tombol manual BLE dilepas
-    bleSession = {false, nullptr};
+    bleSession = {false, nullptr, KEY_BLE};
     cancelManual(0, false);
   }
   if (rxLine.length() > 512) rxLine = "";  // buang sampah tanpa "\n"
@@ -673,7 +752,7 @@ void buildStatus(JsonDocument &doc, Session *s) {
     if (s->info && s->authed) { doc["rid"] = rmIdForStatus(); doc["ron"] = rmIsOn(); }
     s->info = false;
   }
-  uint32_t lock = lockLeftMs();
+  uint32_t lock = s ? lockLeftMs(s->key) : 0;  // sisa kunci untuk klien INI saja
   if (lock) doc["lock"] = (lock + 999) / 1000;      // detik sisa kunci salah kode
   if (bootHoldMs) doc["boot"] = bootHoldMs / 1000;   // tombol BOOT sedang ditahan (detik)
 }
@@ -746,9 +825,11 @@ void handleLines(const String &text, Session &s) {
   }
 }
 
-String wifiStatusJson(Session *s = nullptr) {
+// lockKey: untuk GET /api/status (tanpa sesi) → tetap kirim sisa kunci milik IP peminta.
+String wifiStatusJson(Session *s = nullptr, uint32_t lockKey = 0) {
   JsonDocument doc;
   buildStatus(doc, s);
+  if (!s && lockKey) { uint32_t l = lockLeftMs(lockKey); if (l) doc["lock"] = (l + 999) / 1000; }
   doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   doc["sta"] = WiFi.status() == WL_CONNECTED;
   doc["ble"] = bleConnected.load();
@@ -774,11 +855,11 @@ void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
   if (num >= WS_SLOTS) return;
   Session &ss = wsSession[num];
   if (type == WStype_CONNECTED) {
-    ss = {false, nullptr};
+    ss = {false, nullptr, (uint32_t)ws.remoteIP(num)};
     String s = wifiStatusJson(&ss) + "\n";
     ws.sendTXT(num, s);
   } else if (type == WStype_DISCONNECTED) {
-    ss = {false, nullptr};
+    ss = {false, nullptr, 0};
     cancelManual(1 + num, false);
   } else if (type == WStype_TEXT) {
     if (len > 1024) return;
@@ -817,11 +898,11 @@ void setupWifi() {
   if (staSsid.length()) WiFi.begin(staSsid.c_str(), staPass.c_str());
   MDNS.begin(MDNS_NAME);
 
-  http.on("/api/status", HTTP_GET, []() { sendCors(); http.send(200, "application/json", wifiStatusJson()); });
+  http.on("/api/status", HTTP_GET, []() { sendCors(); http.send(200, "application/json", wifiStatusJson(nullptr, (uint32_t)http.client().remoteIP())); });
   // HTTP tanpa sesi: body harus diawali {"cmd":"auth","code":"…"} (atau tiap perintah membawa "code").
   http.on("/api/cmd", HTTP_POST, []() {
     sendCors();
-    Session hs = {false, nullptr, false};
+    Session hs = {false, nullptr, (uint32_t)http.client().remoteIP(), false};
     String body = http.arg("plain");
     if (body.length() > 2048) { http.send(413, "text/plain", "terlalu besar"); return; }
     handleLines(body, hs);
@@ -1043,17 +1124,17 @@ void hmacHex(const String &key, const char *msg, size_t len, char out[65]) {
 
 // STOP remote lewat jalur yang sama dengan STOP lokal (handleLine), supaya semantik STOP selalu identik.
 void rmStop() {
-  rmSession = {true, nullptr, false};
+  rmSession = {true, nullptr, KEY_RM_ANON, false};
   handleLine("{\"cmd\":\"stop\"}", rmSession);
 }
 
-void rmBadCode(const char *rid) {
-  if (++authFails >= AUTH_MAX_FAIL) {
-    authFails = 0;
-    authLockUntil = deadlineIn(AUTH_LOCK_MS);
-    Serial.println("Remote: terlalu banyak tanda tangan salah, dikunci 30 detik");
-    rmEvent("locked", rid);
-  } else rmEvent("bad_code", rid);
+// Id klien remote ("c", maks 24 karakter dari web/app) → kunci slot 0xFE00xx00 (FNV-1a 16 bit). Tanpa "c" = klien anonim.
+uint32_t rmClientKey(const char *c) {
+  if (!c || !*c) return KEY_RM_ANON;
+  uint32_t h = 2166136261u;
+  for (int i = 0; c[i] && i < 24; i++) { h ^= (uint8_t)c[i]; h *= 16777619u; }
+  h = (h ^ (h >> 16)) & 0xFFFF;
+  return KEY_RM_ANON | ((h ? h : 1) << 8);
 }
 
 // Format pesan perintah remote:  "<hmac 64 hex> <json>"   (JSON berisi cmd, n = nonce, q = nomor urut, r = id balasan)
@@ -1082,14 +1163,16 @@ void rmHandle(const char *data, size_t len) {
   if (strcmp(d["n"] | "", nonce)) { rmEvent("stale", rid); return; }   // nonce lama (modul reconnect) → UI ambil nonce baru
   uint32_t q = d["q"] | 0;
   if (q <= rmLastQ) { rmEvent("stale", rid); return; }                 // pesan diulang (replay) / urutan lama
-  if (lockLeftMs()) { rmEvent("locked", rid); return; }
+  // Kunci salah kode PER KLIEN remote (kolam slot sendiri, aturan sama dengan lokal: 5x → 30 dtk, lalu bertingkat s/d 15 mnt).
+  rmSession = {true, nullptr, rmClientKey(d["c"] | ""), false};
+  if (lockLeftMs(rmSession.key)) { rmEvent("locked", rid); return; }
   char want[65];
   hmacHex(accessCode, json, jl, want);
   char got[65];
   memcpy(got, data, 64);
   got[64] = 0;
-  if (!sameSecret(String(want), got)) { rmBadCode(rid); return; }
-  authFails = 0;
+  if (!authVerdict(rmSession, sameSecret(String(want), got))) { rmEvent(rmSession.ev ? rmSession.ev : "bad_code", rid); return; }
+  rmSession.ev = nullptr;
   rmLastQ = q;
   rmLiveUntil = deadlineIn(RM_LIVE_MS);
   rmForcePub = true;
@@ -1098,7 +1181,6 @@ void rmHandle(const char *data, size_t len) {
   if (!strcmp(cmd, "manual") && strcmp(d["action"] | "stop", "stop")) { rmEvent("no_manual_remote", rid); return; }
   if (!strcmp(cmd, "auth")) { rmEvent("auth_ok", rid); return; }
   if (!strcmp(cmd, "logout")) { rmEvent("logout", rid); return; }
-  rmSession = {true, nullptr, false};
   String line;
   line.reserve(jl);
   for (size_t i = 0; i < jl; i++) line += json[i];

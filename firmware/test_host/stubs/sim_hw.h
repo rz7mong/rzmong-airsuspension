@@ -53,11 +53,11 @@ class Adafruit_ADS1115 {
 };
 
 // ---------- Preferences (NVS di RAM) ----------
-namespace sim { extern std::map<std::string, std::map<std::string, std::vector<uint8_t>>> nvs; }
+namespace sim { extern std::map<std::string, std::map<std::string, std::vector<uint8_t>>> nvs; extern long nvsWrites; }
 class Preferences {
   std::string ns; bool open = false; bool ro = false;
   std::map<std::string, std::vector<uint8_t>> *m() { return &sim::nvs[ns]; }
-  template <class T> size_t putT(const char *k, T v) { if (!open || ro) return 0; auto &x = (*m())[k]; x.assign((uint8_t *)&v, (uint8_t *)&v + sizeof(T)); return sizeof(T); }
+  template <class T> size_t putT(const char *k, T v) { if (!open || ro) return 0; sim::nvsWrites++; auto &x = (*m())[k]; x.assign((uint8_t *)&v, (uint8_t *)&v + sizeof(T)); return sizeof(T); }
   template <class T> T getT(const char *k, T d) { if (!open) return d; auto it = m()->find(k); if (it == m()->end() || it->second.size() != sizeof(T)) return d; T v; memcpy(&v, it->second.data(), sizeof(T)); return v; }
  public:
   bool begin(const char *n, bool readOnly = false) { if (readOnly && !sim::nvs.count(n)) return false; ns = n; open = true; ro = readOnly; return true; }
@@ -65,7 +65,7 @@ class Preferences {
   bool clear() { if (!open || ro) return false; m()->clear(); return true; }
   bool remove(const char *k) { if (!open || ro) return false; return m()->erase(k) > 0; }
   bool isKey(const char *k) { return open && m()->count(k); }
-  size_t putBytes(const char *k, const void *v, size_t n) { if (!open || ro) return 0; auto &x = (*m())[k]; x.assign((const uint8_t *)v, (const uint8_t *)v + n); return n; }
+  size_t putBytes(const char *k, const void *v, size_t n) { if (!open || ro) return 0; sim::nvsWrites++; auto &x = (*m())[k]; x.assign((const uint8_t *)v, (const uint8_t *)v + n); return n; }
   size_t getBytes(const char *k, void *buf, size_t n) { if (!open) return 0; auto it = m()->find(k); if (it == m()->end()) return 0; size_t c = std::min(n, it->second.size()); memcpy(buf, it->second.data(), c); return c; }
   size_t putInt(const char *k, int32_t v) { return putT(k, v); }
   int32_t getInt(const char *k, int32_t d = 0) { return getT(k, d); }
@@ -75,7 +75,7 @@ class Preferences {
   uint16_t getUShort(const char *k, uint16_t d = 0) { return getT(k, d); }
   size_t putBool(const char *k, bool v) { return putT(k, (uint8_t)v); }
   bool getBool(const char *k, bool d = false) { return getT(k, (uint8_t)d); }
-  size_t putString(const char *k, const String &v) { if (!open || ro) return 0; auto &x = (*m())[k]; x.assign(v.s.begin(), v.s.end()); x.push_back(0); return v.length(); }
+  size_t putString(const char *k, const String &v) { if (!open || ro) return 0; sim::nvsWrites++; auto &x = (*m())[k]; x.assign(v.s.begin(), v.s.end()); x.push_back(0); return v.length(); }
   String getString(const char *k, const String &d = String()) { if (!open) return d; auto it = m()->find(k); if (it == m()->end() || it->second.empty()) return d; return String((const char *)it->second.data()); }
 };
 
@@ -196,8 +196,11 @@ class MDNSResponder { public: bool begin(const char *) { return true; } void add
 extern MDNSResponder MDNS;
 
 enum HTTPMethod { HTTP_GET = 1, HTTP_POST = 3, HTTP_OPTIONS = 6 };
+class WiFiClient { public: IPAddress ip; IPAddress remoteIP() { return ip; } };
 class WebServer {
  public:
+  WiFiClient cl;
+  WiFiClient &client() { return cl; }
   std::map<std::pair<std::string, int>, std::function<void()>> routes;
   std::function<void()> notFound;
   String body, curUri; int lastCode = 0; String lastBody;
@@ -212,7 +215,8 @@ class WebServer {
   void send(int code, const char * = "", const String &b = String()) { lastCode = code; lastBody = b; }
   void send_P(int code, const char *, const char *, size_t) { lastCode = code; lastBody = String("<asset>"); }
   // helper uji
-  String request(const char *path, HTTPMethod m, const String &b = String()) {
+  String request(const char *path, HTTPMethod m, const String &b = String(), IPAddress from = IPAddress(192, 168, 4, 2)) {
+    cl.ip = from;
     body = b; curUri = path; lastCode = 0; lastBody = String();
     auto it = routes.find({path, (int)m});
     if (it != routes.end()) it->second(); else if (notFound) notFound();
@@ -224,7 +228,8 @@ typedef enum { WStype_ERROR, WStype_DISCONNECTED, WStype_CONNECTED, WStype_TEXT,
 class WebSocketsServer {
  public:
   typedef std::function<void(uint8_t, WStype_t, uint8_t *, size_t)> Ev;
-  Ev ev; bool conn[8] = {}; std::vector<std::string> sent[8];
+  Ev ev; bool conn[8] = {}; std::vector<std::string> sent[8]; IPAddress ip[8];
+  IPAddress remoteIP(uint8_t n) { return n < 8 ? ip[n] : IPAddress(); }
   WebSocketsServer(int) {}
   void begin() {}
   void onEvent(Ev e) { ev = e; }
@@ -233,7 +238,7 @@ class WebSocketsServer {
   int connectedClients() { int c = 0; for (bool b : conn) c += b; return c; }
   bool clientIsConnected(uint8_t n) { return n < 8 && conn[n]; }
   // helper uji
-  void connect(uint8_t n) { conn[n] = true; ev(n, WStype_CONNECTED, nullptr, 0); }
+  void connect(uint8_t n, IPAddress from = IPAddress(192, 168, 4, 2)) { ip[n] = from; conn[n] = true; ev(n, WStype_CONNECTED, nullptr, 0); }
   void disconnect(uint8_t n) { conn[n] = false; ev(n, WStype_DISCONNECTED, nullptr, 0); }
   void text(uint8_t n, const std::string &t) { ev(n, WStype_TEXT, (uint8_t *)t.data(), t.size()); }
 };

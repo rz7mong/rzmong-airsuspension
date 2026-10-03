@@ -28,6 +28,7 @@ try:
         b = p.chromium.launch()
         for w, h, nama in ((390, 860, "HP"), (1280, 860, "desktop")):
             pg = b.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script("localStorage.setItem('rzm.ob.control', '1')")   # lewati tur onboarding (muncul 0,9 dtk setelah buka, bisa menutupi tombol)
             errs = []
             pg.on("pageerror", lambda e: errs.append(str(e)))
             pg.goto(f"http://127.0.0.1:{WEB_PORT}/control/?layout=dash")

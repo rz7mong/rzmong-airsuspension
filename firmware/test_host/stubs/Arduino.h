@@ -107,5 +107,6 @@ class IPAddress {
  public:
   uint8_t o[4];
   IPAddress(uint8_t a = 0, uint8_t b = 0, uint8_t c = 0, uint8_t d = 0) : o{a, b, c, d} {}
+  operator uint32_t() const { return o[0] | (o[1] << 8) | (o[2] << 16) | ((uint32_t)o[3] << 24); }  // seperti core ESP32
   String toString() const { char b[20]; snprintf(b, sizeof(b), "%u.%u.%u.%u", o[0], o[1], o[2], o[3]); return String(b); }
 };

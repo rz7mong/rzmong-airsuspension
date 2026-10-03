@@ -28,6 +28,7 @@ try:
   with sync_playwright() as p:
       b = p.chromium.launch()
       pg = b.new_page(viewport={"width": 420, "height": 900})
+      pg.add_init_script("localStorage.setItem('rzm.ob.control', '1')")   # lewati tur onboarding (muncul 0,9 dtk setelah buka, bisa menutupi tombol)
       errs = []
       pg.on("pageerror", lambda e: errs.append(str(e)))
       pg.on("console", lambda m: errs.append(m.text) if m.type == "error" and "ws://" not in m.text and "WebSocket" not in m.text and "Failed to load resource" not in m.text else None)

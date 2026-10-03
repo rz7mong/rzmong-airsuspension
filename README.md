@@ -41,7 +41,7 @@ Halaman kontrol punya mode demo, jadi tampilan bisa dicoba tanpa modul. Tombol *
 ## Remote internet (firmware 0.4.0+, mati secara default)
 
 - Modul tersambung WiFi router → broker MQTT **TLS 8883**; website (GitHub Pages) & aplikasi → broker yang sama lewat **wss**.
-- Setiap perintah ditandatangani HMAC-SHA256 dengan kode akses (kode tidak dikirim), anti-replay, kunci 30 dtk setelah 5× salah. STOP selalu bisa.
+- Setiap perintah ditandatangani HMAC-SHA256 dengan kode akses (kode tidak dikirim), anti-replay, salah 5× → HP itu saja dikunci (bertingkat 30 dtk–15 mnt, terpisah dari Bluetooth/WiFi lokal). STOP selalu bisa dan tersimpan walau modul restart.
 - Isi/buang manual tidak bisa lewat internet; preset & SEMUA NAIK/TURUN perlu ketuk 2×.
 - Remote hanya bisa diaktifkan lewat koneksi lokal, setelah kode akses default `1234` diganti. Reset BOOT mematikan remote.
 - **Jangan pakai broker publik/tes untuk mobil.** Langkah lengkap (EMQX Cloud Serverless gratis): `docs/REMOTE.md`.
@@ -57,7 +57,7 @@ Halaman kontrol punya mode demo, jadi tampilan bisa dicoba tanpa modul. Tombol *
 - **Ganti** di halaman kontrol → kartu **🔒 KEAMANAN**: isi kode akses saat ini, lalu kode baru / sandi WiFi baru / PIN baru, tekan **SIMPAN KE MODUL**.
   Sandi WiFi baru langsung berlaku (WiFi modul restart ±2 detik). Setelah PIN Bluetooth diganti, semua HP lama harus **lupakan/unpair `RZM-AIR`** lalu pairing ulang.
 - Tanpa kode akses, status tetap bisa dilihat ("lihat saja"), tapi perintah kontrol ditolak. Tombol **STOP** (tutup semua katup) selalu boleh demi keselamatan.
-- Salah kode 5× berturut-turut → modul menolak percobaan selama 30 detik.
+- Salah kode 5× berturut-turut → **klien itu saja** (HP Bluetooth atau alamat IP WiFi) ditolak 30 detik, lalu makin lama tiap salah lagi (maks 15 menit). Orang lain di WiFi tidak bisa mengunci kamu di Bluetooth.
 - Kode, sandi, dan PIN tidak pernah dikirim balik di status JSON.
 - **Lupa kode?** Saat modul menyala, **tahan tombol BOOT (GPIO0) 8 detik**. LED biru berkedip makin cepat, layar bulat dan Serial Monitor menghitung mundur;
   lepas sebelum 8 detik = batal. Yang direset hanya kode akses, sandi WiFi AP, PIN Bluetooth, dan daftar HP yang sudah pairing. Kalibrasi sensor, preset, dan WiFi router tetap.

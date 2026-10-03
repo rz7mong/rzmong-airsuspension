@@ -49,7 +49,13 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 ```
 
 - Perintah kontrol juga boleh membawa `"code"` langsung (alternatif `auth` untuk HTTP).
-- Salah 5× berturut-turut → semua percobaan ditolak 30 detik (`ev":"locked"`, field `lock` = sisa detik).
+- Proteksi tebak kode **per klien** (firmware 0.3.2+): Bluetooth punya hitungan sendiri, klien WiFi dihitung per **alamat IP**
+  (HTTP dan WebSocket dari IP yang sama berbagi hitungan; sambung ulang tidak mereset). Salah 5× → klien itu saja ditolak
+  30 detik (`ev":"locked"`, field `lock` = sisa detik). Setelah pernah dikunci, tiap salah berikutnya langsung mengunci lagi
+  2× lebih lama: 30 dtk → 1 → 2 → 4 → 8 → maks 15 menit. Kode benar mereset; 15 menit tanpa salah juga mereset.
+  Penyerang di WiFi tidak bisa mengunci pemilik di Bluetooth atau di IP lain. Tabel menyimpan 8 IP; kalau penuh oleh IP yang
+  sedang dihukum, IP WiFi **baru** ikut ditahan sampai ada slot bebas (Bluetooth dan sesi yang sudah login tidak terpengaruh).
+- `GET /api/status` membawa `lock` milik IP peminta (tanpa `auth`/`ev`).
 - `newcode` 4–12 karakter ASCII tanpa spasi · `appass` 8–63 karakter (AP restart ±2 detik) · `btpin` tepat 6 angka (pairing lama dihapus).
 - Ganti `newcode` mengunci semua sesi lain; sesi yang mengganti tetap terbuka.
 - Tahan tombol BOOT (GPIO0) 8 detik saat jalan → kredensial kembali default (`1234` / `rzmong123` / `123456`), `ev":"reset"`.
@@ -63,8 +69,8 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 {"cmd":"theme","id":1}                          // tema layar bulat: 0 siang, 1 malam, 2 stance
 {"cmd":"manual","axle":"front","action":"fill"} // fill | dump | stop (tahan tombol → kirim stop saat dilepas)
 {"cmd":"stop"}                                  // semua katup tutup + leveling otomatis BERHENTI sampai preset dipilih
-{"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA (khusus firmware dengan WiFi)
-{"cmd":"wifi","appass":"sandiBaru8"}            // (lama) ganti sandi SoftAP; butuh sesi terbuka, berlaku ±2 detik
+{"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA; ssid ≤32, pass kosong atau 8–63 (selain itu bad_input)
+{"cmd":"wifi","appass":"sandiBaru8","code":"…"} // (lama) ganti sandi SoftAP; 0.3.2+: wajib "code" saat ini, berlaku ±2 detik
 {"cmd":"remote","code":"<kode saat ini>","on":true,"host":"x1y2z3.ala.asia-southeast1.emqxsl.com","port":8883,"user":"rzm-modul","pass":"…"}
                                                 // 0.4.0+: atur remote internet (hanya lewat BLE/WiFi lokal). "pass" kosong/tidak ada = sandi lama;
                                                 // "newid":true = buat ID perangkat baru. → ev saved / bad_remote / rm_default_code / bad_code
@@ -78,7 +84,8 @@ Perilaku katup (firmware 0.3.1+):
   `action:"stop"` datang, koneksi pengirim (BLE / WebSocket) putus, sudah 20 dtk (`MANUAL_MAX_MS`), atau tekanan mencapai
   `BAG_MAX` (isi) / `BAG_MIN` (buang). Setelah dilepas, leveling otomatis kembali ke target preset.
 - `stop` menutup semua katup dan menahan leveling (`"hold":true`) sampai `preset` atau `set` dikirim, atau ACC memicu
-  naik/turun otomatis. Manual tetap bisa dipakai saat hold.
+  naik/turun otomatis. Manual tetap bisa dipakai saat hold. Mulai 0.3.2 hold **disimpan di flash** (NVS `rzm`/`hold`, ditulis
+  hanya saat berubah), jadi tetap aktif setelah listrik putus, restart, atau watchdog.
 - `preset`/`set` juga membuka kunci fault (`bocor`, `buang macet`, `kompresor`) untuk mencoba lagi.
 - `set` dengan `axle` selain `front`/`rear` ditolak (`ev":"bad_input"`).
 
@@ -122,13 +129,16 @@ Mati secara default. Modul (mode STA) → broker MQTT **TLS port 8883** (root CA
 **Format perintah:** `<HMAC-SHA256 64 hex huruf kecil><spasi><JSON>`
 
 ```text
-JSON  = {"cmd":"preset","id":2,"n":"<n dari status>","q":<q terakhir + 1>,"r":"<id acak balasan>"}
+JSON  = {"cmd":"preset","id":2,"n":"<n dari status>","q":<q terakhir + 1>,"r":"<id acak balasan>","c":"<id klien tetap per HP, maks 24>"}
 HMAC  = HMAC-SHA256(kunci = kode akses (byte ASCII), pesan = teks JSON persis seperti dikirim)
 ```
 
 - Modul menolak kalau `n` ≠ nonce saat ini atau `q` ≤ urut terakhir → `ev":"stale"` (UI menandatangani ulang sekali dengan nonce baru).
   Nonce berganti setiap modul (re)connect ke broker, jadi pesan rekaman lama tidak bisa diputar ulang.
-- Tanda tangan salah dihitung sebagai kode salah (5× → `locked` 30 detik, berbagi penghitung dengan BLE/WiFi). Benar → `ev` hasil perintah (`ok`, `auth_ok`, …).
+- Tanda tangan salah dihitung sebagai kode salah **per id klien `c`** dengan aturan yang sama seperti lokal (5× → `locked` 30 detik, lalu bertingkat s/d 15 menit).
+  Klien remote punya kolam 4 slot sendiri: penebak lewat broker tidak bisa mengunci BLE/WiFi lokal (dan sebaliknya). Kalau semua slot remote
+  sedang dihukum, klien remote baru ikut ditolak sampai hukuman meluruh — jalur lokal tetap jalan. Benar → `ev` hasil perintah (`ok`, `auth_ok`, …).
+- STOP remote memakai jalur yang sama dengan STOP lokal: leveling berhenti (`hold`), tersimpan di NVS, tetap aktif setelah restart sampai `preset`/`set`.
 - Tanpa tanda tangan hanya: `{"cmd":"stop"}` (→ `stop_ok`, diproses walau antrean penuh) dan `{"cmd":"live"}` (web/app kirim tiap ±20 dtk → telemetri 1×/dtk selama 60 dtk).
 - Ditolak lewat internet: `security`, `wifi`, `remote`, `rinfo` → `local_only`; `manual` dengan `fill`/`dump` → `no_manual_remote`.
 - `{"cmd":"auth"}` bertanda tangan = cek kode (→ `auth_ok`). Tidak ada sesi di modul; setiap perintah membawa tanda tangan sendiri.

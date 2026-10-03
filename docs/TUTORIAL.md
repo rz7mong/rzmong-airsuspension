@@ -119,6 +119,7 @@ Modul membalas status empat kali per detik (BLE notify atau WebSocket `ws://192.
 6. Longgarkan satu fitting depan sebentar. Psi depan harus turun dan, setelah timeout (90 dtk), layar menampilkan `depan bocor` dan katup isi depan dikunci tutup. Kencangkan lagi, lalu pilih preset untuk mencoba lagi.
 7. Saat mengisi, tekan STOP. Semua katup harus tutup dan **tetap** tutup (layar/UI: `STOP: pilih preset`) sampai preset dipilih.
 8. Tahan ▲ manual lalu matikan Bluetooth HP. Katup harus menutup sendiri (paling lama 20 detik walau koneksi tidak terdeteksi putus).
-9. Cabut kabel sinyal (kuning) satu sensor. UI harus menampilkan `sensor depan`/`sensor belakang`/`sensor tangki`, dan katup as itu / kompresor tidak bergerak.
+9. Tekan STOP, lalu cabut-pasang listrik modul. Leveling harus tetap berhenti (`STOP: pilih preset`) sampai preset dipilih.
+10. Cabut kabel sinyal (kuning) satu sensor. UI harus menampilkan `sensor depan`/`sensor belakang`/`sensor tangki`, dan katup as itu / kompresor tidak bergerak.
 
 Jangan turun sampai ban menggesek fender saat di jalan. Preset parkir untuk foto, bukan untuk dikendarai.

@@ -6,7 +6,7 @@
  *   rzm/<id>/status  retained, telemetri JSON (sama seperti status BLE + n = nonce, q = nomor urut terakhir)
  *   rzm/<id>/online  retained "1"/"0" (LWT)
  *   rzm/<id>/cmd     perintah: "<hmac-sha256 hex> <json>"  (kunci HMAC = kode akses; kode TIDAK pernah dikirim)
- *                    JSON = {"cmd":…, "n":<nonce dari status>, "q":<nomor urut > q terakhir>, "r":<id balasan>, …}
+ *                    JSON = {"cmd":…, "n":<nonce dari status>, "q":<nomor urut > q terakhir>, "r":<id balasan>, "c":<id klien>, …}
  *                    Pengecualian tanpa tanda tangan: {"cmd":"stop"} (keselamatan) dan {"cmd":"live"} (percepat telemetri).
  *   rzm/<id>/evt     balasan {"ev":…, "r":<id balasan>, "q":…}
  * API: window.RZMRemote.create(hooks) → transport {connect, writeLine, disconnect}. HMAC: RZMRemote.hmacHex(key, msg).
@@ -98,6 +98,13 @@
   }
   function cleanId(id) { return String(id || "").trim().toLowerCase().replace(/[^0-9a-f-]/g, ""); }
   function rand(n) { var s = ""; var a = new Uint8Array(n); crypto.getRandomValues(a); for (var i = 0; i < n; i++) s += (a[i] % 36).toString(36); return s; }
+  // Id klien acak per HP/browser (disimpan): firmware ≥0.4.0 menghitung salah kode PER id klien ini.
+  function clientTag() {
+    var k = "rzm.rcid", v = "";
+    try { v = localStorage.getItem(k) || ""; } catch (e) { /* abaikan */ }
+    if (!/^[0-9a-z]{12}$/.test(v)) { v = rand(12); try { localStorage.setItem(k, v); } catch (e) { /* abaikan */ } }
+    return v;
+  }
 
   var LOCAL_ONLY = ["security", "wifi", "remote", "rinfo"];
 
@@ -163,7 +170,7 @@
       ping() { if (T.client && T.client.connected) T.client.publish(T.topics.cmd, '{"cmd":"live"}', { qos: 0 }); },
       publishSigned(obj, key, rid) {
         T.q = Math.max(T.q + 1, 1);
-        var body = Object.assign({}, obj, { n: T.nonce, q: T.q, r: rid });
+        var body = Object.assign({}, obj, { n: T.nonce, q: T.q, r: rid, c: clientTag() });
         var json = JSON.stringify(body);
         T.client.publish(T.topics.cmd, hmacHex(key, json) + " " + json, { qos: 1 });
       },
