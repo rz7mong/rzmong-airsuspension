@@ -14,6 +14,7 @@
 #include <functional>
 #include <algorithm>
 #include <stdexcept>
+#include <cctype>
 
 #define PROGMEM
 #define LOW 0
@@ -46,6 +47,7 @@ class String {
   String substring(unsigned a) const { return a >= s.size() ? String() : String(s.substr(a)); }
   String substring(unsigned a, unsigned b) const { if (a > b) std::swap(a, b); if (a >= s.size()) return String(); return String(s.substr(a, std::min<size_t>(b, s.size()) - a)); }
   void remove(unsigned i, unsigned n) { if (i < s.size()) s.erase(i, n); }
+  void toLowerCase() { for (auto &c : s) c = (char)tolower((unsigned char)c); }
   void trim() { size_t a = s.find_first_not_of(" \t\r\n"); if (a == std::string::npos) { s.clear(); return; } size_t b = s.find_last_not_of(" \t\r\n"); s = s.substr(a, b - a + 1); }
   bool startsWith(const String &p) const { return s.compare(0, p.s.size(), p.s) == 0; }
   long toInt() const { return atol(s.c_str()); }

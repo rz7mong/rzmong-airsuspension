@@ -10,6 +10,9 @@
  *    kirim {"cmd":"auth","code":"…"} sekali per koneksi (HTTP: diawali di tiap body). Status membawa
  *    auth (bool), ev (hasil: auth_ok, bad_code, locked, need_auth, saved, …), lock (detik), def, boot.
  *    Ganti kredensial: {"cmd":"security","code":"<kode saat ini>","newcode":…,"appass":…,"btpin":"6 digit"}.
+ *  - Remote INTERNET (firmware ≥0.4.0): jalur ketiga lewat broker MQTT (wss) → remote.js. Perintah ditandatangani
+ *    HMAC-SHA256 dengan kode akses (kode tidak dikirim). Atur di kartu KEAMANAN: {"cmd":"remote","code":…,"on":…,"host":…}.
+ *  - Tampilan: "dash" (dashboard gaya kontroler manifold, dash.js) atau "classic" → html[data-layout], localStorage rzm.layout.
  */
 (() => {
   "use strict";
@@ -36,7 +39,9 @@
   // Kode akses: disimpan di HP hanya kalau pengguna mencentang "Ingat kode".
   const auth = { ok: false, code: localStorage.getItem("rzm.code") || "", remember: !!localStorage.getItem("rzm.code"), def: false, lock: 0, boot: 0, pending: null, prompted: false };
   const SECRET_KEYS = ["code", "newcode", "appass", "btpin", "pass"];
-  const OPEN_CMDS = ["auth", "logout", "security", "stop"];   // boleh dikirim sebelum kode akses benar
+  const OPEN_CMDS = ["auth", "logout", "security", "stop", "remote"];   // boleh dikirim sebelum kode akses benar
+  const remote = { online: null, rm: 0, rid: "", ron: false, last: 0 };     // status jalur INTERNET & remote modul
+  const pendingSet = { front: null, rear: null };                           // target ▲/▼ yang belum dikonfirmasi modul
 
   /* ---------------- maskot (tema anime) ---------------- */
   const say = (t, m, ms) => { if (window.RZMTheme) RZMTheme.mascot.say(t, m, ms); };
@@ -196,22 +201,44 @@
     async disconnect() { this.onDisc = null; this.stop(); if (this.ws) { this.ws.close(); this.ws = null; } },
   };
 
-  // Jalur aktif: "ble" atau "wifi". Default WiFi kalau halaman dibuka langsung dari modul (http://192.168.4.1 dll).
+  /* INTERNET: broker MQTT lewat wss (remote.js). */
+  const RemoteLink = window.RZMRemote ? RZMRemote.create({
+    onStatus: (m) => { remote.last = Date.now(); applyStatus(m, { poll: true }); },
+    onEvent: (ev) => { if (!(ev === "auth_ok" && auth.ok)) onEvent(ev); },
+    onOnline: (v) => {
+      remote.online = v;
+      if (!connected || link !== "remote") return;
+      if (v === true) { setStatus("live", "ONLINE"); if (!auth.ok && auth.code) send({ cmd: "auth", code: auth.code }); }
+      else if (v === false) { setStatus("off", "MODUL OFFLINE"); log("Modul offline (tidak tersambung ke broker). Cek WiFi router & daya mobil."); }
+      else setStatus("busy", "MENYAMBUNG ULANG");
+    },
+    getCode: () => auth.code,
+    log: (m) => log(m),
+  }) : null;
+
+  // Jalur aktif: "ble", "wifi" (AP/LAN lokal) atau "remote" (internet). Default WiFi kalau halaman dibuka dari modul.
   const servedByModule = location.protocol === "http:" && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
   let link = localStorage.getItem("rzm.link") || (servedByModule ? "wifi" : "ble");
+  if (link === "remote" && (!RemoteLink || servedByModule)) link = servedByModule ? "wifi" : "ble";
   const savedHost = localStorage.getItem("rzm.host");
-  let transport = link === "wifi" ? WifiLink : bleTransport;
+  const pickTransport = (l) => (l === "wifi" ? WifiLink : l === "remote" ? RemoteLink : bleTransport);
+  let transport = pickTransport(link);
 
   function setLink(l) {
     if (connected) { log("Putuskan koneksi dulu sebelum ganti jalur."); return; }
-    link = l; transport = l === "wifi" ? WifiLink : bleTransport;
+    if (l === "remote" && !RemoteLink) { log("remote.js tidak termuat."); return; }
+    link = l; transport = pickTransport(l);
     localStorage.setItem("rzm.link", l);
     $("linkBle").classList.toggle("active", l === "ble");
     $("linkWifi").classList.toggle("active", l === "wifi");
+    $("linkNet").classList.toggle("active", l === "remote");
     $("wifiHostBox").hidden = l !== "wifi";
+    $("netBox").hidden = l !== "remote";
+    document.documentElement.dataset.link = l;
     let hint = "";
     if (l === "ble") hint = isNative ? "BLE native: izinkan Bluetooth/Perangkat sekitar saat diminta." : navigator.bluetooth ? "" : "Browser ini tidak punya Web Bluetooth — pakai Chrome/Edge, aplikasi Android, atau jalur WiFi.";
-    else hint = "Sambungkan HP ke WiFi RZMONG-AIR (sandi default rzmong123), lalu tekan Sambungkan. " + (location.protocol === "https:" && !isNative ? "Dari halaman HTTPS ini WiFi diblokir browser — buka http://192.168.4.1." : "");
+    else if (l === "wifi") hint = "Sambungkan HP ke WiFi RZMONG-AIR (sandi default rzmong123), lalu tekan Sambungkan. " + (location.protocol === "https:" && !isNative ? "Dari halaman HTTPS ini WiFi diblokir browser — buka http://192.168.4.1." : "");
+    else hint = servedByModule ? "Halaman dari modul tidak punya internet — buka rz7mong.github.io atau aplikasi Android untuk remote." : "Kontrol dari mana saja lewat internet. Modul harus tersambung WiFi router & remote diaktifkan di kartu KEAMANAN.";
     $("linkHint").textContent = hint.trim();
   }
 
@@ -220,6 +247,11 @@
   function send(obj) {
     const line = JSON.stringify(obj);
     if (!connected) { log((demo ? "[demo] " : "[offline] ") + masked(obj), "tx"); return; }
+    if (link === "remote" && obj.cmd === "manual" && obj.action !== "stop") {
+      log("Isi/buang manual (tahan tombol) tidak tersedia lewat internet demi keamanan. Pakai preset atau ▲/▼ target di dashboard.");
+      say("Lewat internet pakai preset ya~ 🙏", "worry", 2200);
+      return;
+    }
     if (!auth.ok && !OPEN_CMDS.includes(obj.cmd)) {
       log("Terkunci — masukkan kode akses dulu. Perintah tidak dikirim: " + obj.cmd);
       showLock("Masukkan kode akses untuk mengontrol suspensi.");
@@ -243,6 +275,13 @@
     bad_input: "Tidak ada yang diubah.",
     logout: "Kontrol dikunci. Masukkan kode akses untuk membuka lagi.",
     reset: "Kredensial modul direset ke default lewat tombol BOOT.",
+    stale: "Perintah kedaluwarsa (modul baru tersambung ulang). Coba lagi.",
+    local_only: "Pengaturan keamanan, WiFi, dan remote hanya bisa diubah lewat Bluetooth/WiFi lokal, bukan lewat internet.",
+    no_manual_remote: "Modul menolak isi/buang manual lewat internet (keamanan). Pakai preset atau target.",
+    stop_ok: "STOP diterima modul — semua katup ditutup.",
+    ok: "",
+    bad_remote: "Pengaturan remote tidak valid (cek host, port, user, sandi).",
+    rm_default_code: "Ganti kode akses default 1234 dulu sebelum mengaktifkan remote internet.",
   };
   function setAuthOk(ok) {
     if (auth.ok === ok) return;
@@ -263,14 +302,22 @@
     send({ cmd: "auth", code });
   }
   function onEvent(ev) {
-    const txt = EV_TEXT[ev] || ev;
+    const txt = EV_TEXT[ev] === undefined ? ev : EV_TEXT[ev];
+    if (!txt) return;
     log(txt);
+    if (["bad_remote", "rm_default_code"].includes(ev) || (ev === "saved" && auth.pending && auth.pending.remote)) {
+      const p = auth.pending; auth.pending = null;
+      $("rmMsg").textContent = ev === "saved" ? (p.on ? "Remote AKTIF disimpan di modul. Status di bawah berubah jadi ONLINE kalau modul berhasil ke broker." : "Remote dimatikan.") : txt;
+      if (ev === "saved") { $("rmPass").value = ""; $("rmCode").value = ""; }
+      syncSecurity(); return;
+    }
     if (ev === "auth_ok") {
       if (auth.remember) localStorage.setItem("rzm.code", auth.code); else localStorage.removeItem("rzm.code");
       setAuthOk(true);
+      if (link !== "remote") setTimeout(() => send({ cmd: "rinfo" }), 300);   // minta id perangkat remote
       say("Kodenya benar~ silakan kontrol ♡", "happy", 2200);
     } else if (ev === "bad_code" || ev === "locked") {
-      if (auth.pending) { auth.pending = null; $("secMsg").textContent = ev === "locked" ? EV_TEXT.locked : "Kode akses saat ini salah."; }
+      if (auth.pending) { const rmP = auth.pending.remote; auth.pending = null; $(rmP ? "rmMsg" : "secMsg").textContent = ev === "locked" ? EV_TEXT.locked : "Kode akses saat ini salah."; }
       else { localStorage.removeItem("rzm.code"); showLock(txt + (auth.lock ? ` Coba lagi ${auth.lock} detik.` : "")); }
       say("Kodenya salah… 🥺", "worry", 2200);
     } else if (ev === "need_auth" || ev === "logout") {
@@ -322,6 +369,17 @@
     else if (auth.lock) w = `🔒 Salah kode berkali-kali, coba lagi ${auth.lock} detik.`;
     $("secWarn").textContent = w;
     $("secLock").disabled = !connected || !auth.ok;
+    const RMS = ["MATI", "TUNGGU WIFI ROUTER", "MENYAMBUNG", "ONLINE", "GAGAL KONEKSI", "DITOLAK BROKER"];
+    const rt = $("rmTag");
+    if (rt) {
+      rt.textContent = link === "remote" && connected ? (remote.online ? "ONLINE" : "OFFLINE") : RMS[remote.rm] || "—";
+      rt.dataset.s = remote.rm === 3 || (link === "remote" && remote.online) ? "ok" : remote.rm >= 4 ? "bad" : remote.rm ? "warn" : "";
+      $("rmId").textContent = remote.rid || (link === "remote" ? (RemoteLink && RemoteLink.cfg.id) || "—" : "sambung lokal + kode akses untuk melihat");
+      $("rmCopy").disabled = !remote.rid;
+      $("rmSave").disabled = link === "remote";
+      const tip = { 1: "Modul belum tersambung ke WiFi router. Isi WiFi router di kartu OTOMATIS → WiFi modul.", 4: "Gagal ke broker: cek host/port 8883, internet router, atau sertifikat.", 5: "Broker menolak username/sandi." }[remote.rm];
+      $("rmHint").textContent = link === "remote" ? "Pengaturan remote hanya bisa diubah lewat Bluetooth/WiFi lokal." : tip || "";
+    }
   }
 
   async function connectToggle() {
@@ -330,12 +388,12 @@
       setStatus("busy", "MENCARI");
       const name = await transport.connect(onDisconnect);
       connected = true; rxBuf = ""; auth.ok = false; auth.def = false;
-      setStatus("live", "TERHUBUNG");
+      setStatus("live", link === "remote" ? (remote.online === false ? "MODUL OFFLINE" : "BROKER OK") : "TERHUBUNG");
       if (auth.code) send({ cmd: "auth", code: auth.code });
-      else setTimeout(() => { if (connected && !auth.ok) showLock("Modul terhubung. Masukkan kode akses (default 1234)."); }, 600);
+      else setTimeout(() => { if (connected && !auth.ok && !(link === "remote" && remote.online === false)) showLock("Modul terhubung. Masukkan kode akses (default 1234)."); }, link === "remote" ? 1500 : 600);
       $("connectText").textContent = "PUTUSKAN";
       say("Tersambung~! Halo modul RZM ♡", "happy", 2400);
-      log(`Tersambung ke ${name} (${link === "wifi" ? "WiFi" : isNative ? "BLE aplikasi Android" : "Web Bluetooth"})`);
+      log(`Tersambung ke ${name} (${link === "wifi" ? "WiFi" : link === "remote" ? "INTERNET" : isNative ? "BLE aplikasi Android" : "Web Bluetooth"})`);
     } catch (e) {
       connected = false;
       setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
@@ -345,7 +403,7 @@
   }
   function onDisconnect() {
     if (!connected) return;
-    connected = false; auth.ok = false; auth.pending = null;
+    connected = false; auth.ok = false; auth.pending = null; remote.online = null;
     syncSecurity();
     $("connectText").textContent = "SAMBUNGKAN";
     setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
@@ -364,15 +422,19 @@
     auth.boot = typeof m.boot === "number" ? m.boot : 0;
     // HTTP mengirim ulang auth di tiap perintah → "auth_ok" berulang tidak perlu diumumkan lagi.
     if (typeof m.ev === "string" && m.ev && !(m.ev === "auth_ok" && wasOk)) onEvent(m.ev);
-    for (const k of ["tank", "front", "rear", "pf", "pr"]) if (typeof m[k] === "number") state[k] = m[k];
+    // Target yang sedang diubah di dashboard (▲/▼) jangan ditimpa status lama sampai modul membalas nilai baru.
+    for (const ax of ["front", "rear"]) { const pd = pendingSet[ax], k = ax === "front" ? "pf" : "pr"; if (pd && (m[k] === pd.v || Date.now() > pd.until)) pendingSet[ax] = null; }
+    for (const k of ["tank", "front", "rear", "pf", "pr"]) if (typeof m[k] === "number" && !(k === "pf" && pendingSet.front) && !(k === "pr" && pendingSet.rear)) state[k] = m[k];
     if (typeof m.speed === "number") state.speed = m.speed;
     if (typeof m.preset === "number") state.preset = clamp(m.preset, 0, 2);
     for (const k of ["comp", "rise", "drop", "acc"]) if (typeof m[k] === "boolean") state[k] = m[k];
     if (typeof m.theme === "number") state.theme = clamp(m.theme, 0, 2);
     if (typeof m.fault === "string") { if (m.fault && m.fault !== state.fault) say("Awas! " + m.fault + " 😣", "worry", 3200); state.fault = m.fault; }
     if (typeof m.ip === "string") state.ip = m.ip;
+    if (typeof m.rm === "number") remote.rm = m.rm;
+    if (typeof m.rid === "string") { remote.rid = m.rid; remote.ron = !!m.ron; }
     if (typeof m.speed === "number") hasSpeed = true;
-    if (typeof m.pf === "number" && typeof m.pr === "number") {
+    if (typeof m.pf === "number" && typeof m.pr === "number" && !pendingSet.front && !pendingSet.rear) {
       const p = presetVals[state.preset];
       if (p.f !== m.pf || p.r !== m.pr) { p.f = m.pf; p.r = m.pr; savePresetCache(); }
     }
@@ -476,7 +538,7 @@
   const parts = {
     pump: ["⚙️ Kompresor", "Mengisi tangki. Hidup di bawah 145 psi, mati di 165 psi. Jangan lewat relay kecil — pakai relay 40 A di GPIO 13.", () => `Status: <b>${state.comp ? "HIDUP" : "MATI"}</b>`],
     tank: ["🛢️ Tangki", "Penyimpan udara. Sensor tangki (ADS1115 A0) membaca psi yang tampil di HUD dan layar bulat.", () => `Tekanan: <b>${Math.round(state.tank)} psi</b>`],
-    esp: ["🎛️ ESP32", "Otak modul. Membaca sensor, menggerakkan solenoid, dan bicara ke HP lewat Bluetooth RZM-AIR atau WiFi RZMONG-AIR (192.168.4.1).", () => `Link: <b>${connected ? "TERHUBUNG" : demo ? "DEMO" : "TERPUTUS"}</b> · jalur <b>${link === "wifi" ? "WiFi" : "Bluetooth"}</b>${state.ip ? " · IP " + state.ip : ""}`],
+    esp: ["🎛️ ESP32", "Otak modul. Membaca sensor, menggerakkan solenoid, dan bicara ke HP lewat Bluetooth RZM-AIR atau WiFi RZMONG-AIR (192.168.4.1).", () => `Link: <b>${connected ? "TERHUBUNG" : demo ? "DEMO" : "TERPUTUS"}</b> · jalur <b>${link === "wifi" ? "WiFi" : link === "remote" ? "Internet" : "Bluetooth"}</b>${state.ip ? " · IP " + state.ip : ""}`],
     valve: ["🔧 Solenoid", "Empat katup NC: isi/buang depan (GPIO 25/26) dan isi/buang belakang (GPIO 27/14).", () => { const v = valves(); return `Isi D <b>${v.fillF ? "●" : "○"}</b> · Buang D <b>${v.dumpF ? "●" : "○"}</b> · Isi B <b>${v.fillR ? "●" : "○"}</b> · Buang B <b>${v.dumpR ? "●" : "○"}</b>`; }],
     sensor: ["📟 Sensor", "Tiga sensor 0–200 psi (0,5–4,5 V) ke ADS1115: A0 tangki, A1 depan, A2 belakang. Bukan ADC internal ESP32.", () => `T ${Math.round(state.tank)} · D ${Math.round(state.front)} · B ${Math.round(state.rear)} psi`],
     front: ["🔵 Depan", "Dua balon satu saluran. Sensor hanya satu angka. Bocor di satu balon mengempiskan keduanya.", () => `Aktual <b>${Math.round(state.front)}</b> / target <b>${state.pf}</b> psi`],
@@ -625,6 +687,8 @@
     applySpeedo();
     $("linkBle").onclick = () => setLink("ble");
     $("linkWifi").onclick = () => setLink("wifi");
+    $("linkNet").onclick = () => setLink("remote");
+    bindRemoteUi();
     $("wifiHost").value = savedHost || (servedByModule ? location.host : "192.168.4.1");
     $("wifiHost").addEventListener("change", () => localStorage.setItem("rzm.host", $("wifiHost").value.trim()));
     setLink(link);
@@ -641,13 +705,15 @@
       // Kirim saat dilepas saja: firmware menyimpan ke flash (NVS) setiap perintah "set".
       r.addEventListener("change", () => { dragging = null; savePresetCache(); send({ cmd: "set", axle, psi: Number(r.value) }); });
     }
+    $("layoutDash").onclick = () => setLayout("dash");
+    $("layoutClassic").onclick = () => setLayout("classic");
     $("rise").onclick = () => { state.rise = !state.rise; send({ cmd: "auto", rise: state.rise, drop: state.drop }); syncControls(); };
     $("drop").onclick = () => { state.drop = !state.drop; send({ cmd: "auto", rise: state.rise, drop: state.drop }); syncControls(); };
     $("themes").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.theme = Number(b.dataset.id); send({ cmd: "theme", id: state.theme }); syncControls(); });
     const goPreset = (id) => { state.preset = id; const p = presetVals[id]; reactPreset(id, p); state.pf = p.f; state.pr = p.r; send({ cmd: "preset", id }); syncControls(); };
     $("allUp").onclick = () => goPreset(2);
     $("allDown").onclick = () => goPreset(0);
-    $("stop").onclick = () => { manual.front = manual.rear = null; send({ cmd: "stop" }); if (navigator.vibrate) navigator.vibrate(60); say("Semua katup stop! ✋", "worry", 1800); };
+    $("stop").onclick = stopAll;
     document.querySelectorAll(".hold").forEach((b) => {
       const axle = b.dataset.axle, action = b.dataset.action;
       const start = (e) => { e.preventDefault(); if (manual[axle] === action) return; manual[axle] = action; b.classList.add("pressed"); mood(action === "fill" ? "lift" : "crouch"); if (navigator.vibrate) navigator.vibrate(15); send({ cmd: "manual", axle, action }); };
@@ -682,6 +748,69 @@
     $("demoToggle").textContent = "MODE DEMO: " + (demo ? "ON" : "OFF");
   }
 
+  /* ---------------- remote internet: pengaturan di HP & di modul ---------------- */
+  function bindRemoteUi() {
+    if (!RemoteLink) { $("linkNet").hidden = true; return; }
+    const c = RZMRemote.loadCfg();
+    $("netHost").value = c.host; $("netPort").value = c.port; $("netUser").value = c.user; $("netPass").value = c.pass; $("netId").value = c.id; $("netRemember").checked = c.remember;
+    const save = () => RZMRemote.saveCfg({ host: $("netHost").value.trim(), port: Number($("netPort").value) || 8084, user: $("netUser").value.trim(), pass: $("netPass").value, id: RZMRemote.cleanId($("netId").value), remember: $("netRemember").checked });
+    ["netHost", "netPort", "netUser", "netPass", "netId", "netRemember"].forEach((id) => $(id).addEventListener("change", save));
+    $("rmSave").onclick = () => {
+      const code = $("rmCode").value, host = $("rmHost").value.trim().replace(/^[a-z]+:\/\//i, "").replace(/[:/].*$/, ""), port = Number($("rmPort").value) || 8883;
+      const on = $("rmOn").checked, msg = (t) => { $("rmMsg").textContent = t; };
+      if (!code) return msg("Isi kode akses saat ini.");
+      if (on && !host) return msg("Isi alamat broker (mis. xxxx.ala.asia-southeast1.emqxsl.com).");
+      if (host && !/^[a-z0-9.-]{3,100}$/i.test(host)) return msg(EV_TEXT.bad_remote);
+      const cmd = { cmd: "remote", code, on, host, port, user: $("rmUser").value.trim() };
+      if ($("rmPass").value) cmd.pass = $("rmPass").value;
+      if ($("rmNewId").checked) cmd.newid = true;
+      if (!connected) { msg("Mode demo: sambungkan lewat Bluetooth/WiFi lokal untuk menyimpan."); send(cmd); return; }
+      auth.pending = { remote: true, on };
+      msg("Mengirim ke modul…"); send(cmd);
+      $("rmNewId").checked = false;
+    };
+    $("rmCopy").onclick = () => {
+      $("netId").value = remote.rid;
+      if ($("rmHost").value.trim()) $("netHost").value = $("rmHost").value.trim();
+      if (!$("netPort").value) $("netPort").value = 8084;
+      save(); log("ID perangkat & host broker disalin ke pengaturan INTERNET di HP ini (port wss 8084 EMQX / 8884 HiveMQ).");
+      $("rmMsg").textContent = "Tersalin (ID + host). Isi username/sandi broker KHUSUS HP di Pengaturan INTERNET, lalu pilih jalur INTERNET.";
+    };
+  }
+
+  /* ---------------- tampilan: dashboard / klasik ---------------- */
+  function setLayout(l) {
+    if (l !== "dash" && l !== "classic") l = "dash";
+    document.documentElement.dataset.layout = l;
+    localStorage.setItem("rzm.layout", l);
+    $("layoutDash").classList.toggle("active", l === "dash");
+    $("layoutClassic").classList.toggle("active", l === "classic");
+    if (l === "classic" && car && car.resize) car.resize();
+  }
+
+  /* ---------------- API untuk dashboard (dash.js) ---------------- */
+  const setTimer = {};
+  function setTarget(axle, psi) {
+    const key = axle === "front" ? "pf" : "pr";
+    psi = clamp(Math.round(psi), BAG_MIN, BAG_MAX);
+    state[key] = psi; presetVals[state.preset][axle === "front" ? "f" : "r"] = psi;
+    pendingSet[axle] = { v: psi, until: Date.now() + 8000 };
+    syncControls();
+    clearTimeout(setTimer[axle]);
+    // Kirim setelah jari berhenti 0,6 dtk: firmware menyimpan ke flash setiap perintah "set".
+    setTimer[axle] = setTimeout(() => {
+      pendingSet[axle] = { v: state[key], until: Date.now() + 4000 };
+      savePresetCache(); send({ cmd: "set", axle, psi: state[key] });
+    }, 600);
+  }
+  function goPresetApi(id) { state.preset = id; const p = presetVals[id]; reactPreset(id, p); state.pf = p.f; state.pr = p.r; send({ cmd: "preset", id }); syncControls(); }
+  function stopAll() { manual.front = manual.rear = null; send({ cmd: "stop" }); if (navigator.vibrate) navigator.vibrate(60); say("Semua katup stop! ✋", "worry", 1800); }
+  const api = {
+    state, ui, presetVals, PRESET_NAMES, BAG_MIN, BAG_MAX, setTarget, goPreset: goPresetApi, stop: stopAll, valves: () => valves(),
+    conn: () => ({ connected, link, demo, online: remote.online, last: remote.last, authOk: auth.ok, rm: remote.rm }),
+    connect: () => connectToggle(), unlock: () => showLock("Masukkan kode akses untuk mengontrol suspensi."),
+  };
+
   /* ---------------- loop render ---------------- */
   let lastT = performance.now(), lastSim = 0, lastInfo = 0;
   function frame(now) {
@@ -703,8 +832,8 @@
     $("rearVal").textContent = Math.round(ui.rear);
     setGauge("gFront", ui.front, state.pf);
     setGauge("gRear", ui.rear, state.pr);
-    drawCar(dt);
-    drawHw();
+    if (document.documentElement.dataset.layout !== "dash") { drawCar(dt); drawHw(); }
+    if (window.RZMDash) RZMDash.frame(dt);
     if (now - lastInfo > 300) { syncControls(); syncSecurity(); drawInfo(); lastInfo = now; }
     requestAnimationFrame(frame);
   }
@@ -726,10 +855,12 @@
   buildCar();
   buildHw();
   bindControls();
+  setLayout(new URLSearchParams(location.search).get("layout") || localStorage.getItem("rzm.layout") || "dash");
+  if (window.RZMDash) RZMDash.mount(api);
   initPwa();
   Object.assign(ui, { tank: state.tank, front: 20, rear: 20, speed: 0 });
   setStatus(demo ? "demo" : "off", demo ? "DEMO" : "TERPUTUS");
-  log(`Siap. BLE: ${isNative ? "native (Capacitor)" : navigator.bluetooth ? "Web Bluetooth" : "tidak tersedia"} · WiFi: WebSocket/HTTP. Jalur aktif: ${link === "wifi" ? "WiFi" : "Bluetooth"}. ${demo ? "Mode demo aktif." : ""}`);
+  log(`Siap. BLE: ${isNative ? "native (Capacitor)" : navigator.bluetooth ? "Web Bluetooth" : "tidak tersedia"} · WiFi: WebSocket/HTTP · Internet: MQTT wss. Jalur aktif: ${link === "wifi" ? "WiFi" : link === "remote" ? "Internet" : "Bluetooth"}. ${demo ? "Mode demo aktif." : ""}`);
   syncControls();
   requestAnimationFrame(frame);
   if (window.RZMTheme) {
@@ -741,5 +872,5 @@
       { sel: ".tp-btn", title: "4. Ganti tema", text: "Coba tema Neon, Cyber Merah, Terang, atau <b>Anime Sakura</b> ✿" },
     ]), 900);
   }
-  window.RZM = { state, send, applyStatus, showLock, auth };   // untuk debug di konsol
+  window.RZM = { state, send, applyStatus, showLock, auth, remote, api, setLayout };   // untuk debug di konsol
 })();

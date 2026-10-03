@@ -27,7 +27,10 @@ BLECharacteristic *bleRx = nullptr;
 BLEServerCallbacks *bleSrvCb = nullptr;
 BLEServer *bleSrv = nullptr;
 std::vector<std::string> softApPass;
+int tasksCreated = 0;
+uint32_t rnd = 1;
 }
+EspClass ESP;
 HardwareSerial Serial;
 TwoWire Wire;
 SPIClass SPI;
@@ -483,6 +486,183 @@ static void t_ble_thread_race() {
   CHECK(ok && writes > 100, "loop macet / tidak ada tulisan (%ld)", (long)writes);
 }
 
+// ---------------- remote internet (MQTT) ----------------
+// Task MQTT tidak jalan di simulasi: pesan broker disuntikkan lewat rmCallback() (persis seperti PubSubClient),
+// lalu loop() → pollRemote() memprosesnya. Tanda tangan HMAC-SHA256 dibuat sama seperti web/app (remote.js).
+static uint32_t rmQ = 0;
+static std::string rmSigned(const std::string &json, const std::string &code) {
+  char hex[65]; hmacHex(String(code.c_str()), json.c_str(), json.size(), hex);
+  return std::string(hex) + " " + json;
+}
+static std::string rmCmd(const std::string &body, const std::string &code, uint32_t q = 0, const std::string &client = "hpPemilik01") {
+  if (!q) q = ++rmQ;
+  return rmSigned("{" + body + ",\"n\":\"" + std::string(rmNonce) + "\",\"q\":" + std::to_string(q) + ",\"r\":\"t\",\"c\":\"" + client + "\"}", code);
+}
+static std::vector<std::string> rmEvents() {
+  std::vector<std::string> v; char b[RM_EV_MAX];
+  while (xQueueReceive(rmEvQ, b, 0) == pdTRUE) v.push_back(b);
+  return v;
+}
+static std::string rmSend(const std::string &msg) {
+  rmCallback(nullptr, (byte *)msg.data(), msg.size());
+  run(1);
+  auto v = rmEvents();
+  return v.empty() ? "" : v.back();
+}
+static void rmSetup(const char *code = "Kode-8899") {
+  boot();
+  post(std::string("{\"cmd\":\"security\",\"code\":\"1234\",\"newcode\":\"") + code + "\"}");
+  auto r = post(std::string("{\"cmd\":\"remote\",\"code\":\"") + code + "\",\"on\":true,\"host\":\"abc.emqxsl.com\",\"port\":8883,\"user\":\"modul\",\"pass\":\"RahasiaBroker1\"}");
+  strcpy(rmNonce, "0123456789abcdef");
+  rmState = 3; rmLastQ = 0; rmQ = 0;
+  rmEvents();
+}
+
+static void t_remote_config() {
+  boot();
+  CHECK(!rmOn && rmStateCode() == 0 && sim::tasksCreated == 1, "remote harus MATI secara default (task tetap siap)");
+  CHECK(rmId.length() == 21 && rmId.c_str()[12] == '-', "id perangkat salah format: %s", rmId.c_str());
+  auto r = post("{\"cmd\":\"remote\",\"code\":\"1234\",\"on\":true,\"host\":\"abc.emqxsl.com\",\"user\":\"u\",\"pass\":\"p\"}");
+  CHECK(r["ev"] == "rm_default_code" && !rmOn, "remote boleh aktif saat kode masih 1234: %s", http.lastBody.c_str());
+  post("{\"cmd\":\"security\",\"code\":\"1234\",\"newcode\":\"Kode-8899\"}");
+  r = post("{\"cmd\":\"remote\",\"code\":\"salah\",\"on\":true,\"host\":\"abc.emqxsl.com\"}");
+  CHECK(r["ev"] == "bad_code" && !rmOn, "kode salah diterima");
+  r = post("{\"cmd\":\"remote\",\"code\":\"Kode-8899\",\"on\":true,\"host\":\"bad host/x\"}");
+  CHECK(r["ev"] == "bad_remote", "host tidak valid diterima");
+  r = post("{\"cmd\":\"remote\",\"code\":\"Kode-8899\",\"on\":true,\"host\":\"ABC.emqxsl.com\",\"port\":8883,\"user\":\"modul\",\"pass\":\"RahasiaBroker1\"}");
+  CHECK(r["ev"] == "saved" && rmOn && rmHost == "abc.emqxsl.com", "simpan remote gagal: %s", http.lastBody.c_str());
+  CHECK(Preferences().begin("rzmrm", true), "NVS rzmrm tidak ada");
+  // status lokal & telemetri tidak boleh membawa host/user/sandi broker
+  bool leak = http.lastBody.s.find("RahasiaBroker1") != std::string::npos || http.lastBody.s.find("emqxsl") != std::string::npos;
+  strcpy(rmNonce, "0123456789abcdef"); rmState = 3; rmForcePub = true; run(5);
+  std::string tel = rmStatusBuf;
+  leak |= tel.find("RahasiaBroker1") != std::string::npos || tel.find("modul") != std::string::npos || tel.find("Kode-8899") != std::string::npos;
+  leak |= sim::serialLog.find("RahasiaBroker1") != std::string::npos;
+  CHECK(!leak, "rahasia broker/kode bocor: %s", tel.c_str());
+  JsonDocument t; CHECK(!deserializeJson(t, tel) && t["n"] == "0123456789abcdef" && t["fw"] == FW_VERSION, "telemetri tidak valid: %s", tel.c_str());
+  // reset BOOT mematikan remote
+  sim::pinIn[PIN_BOOT] = LOW; run(8300); sim::pinIn[PIN_BOOT] = HIGH; run(100);
+  CHECK(!rmOn && accessCode == "1234", "reset BOOT tidak mematikan remote");
+}
+
+static void t_remote_signed_cmds() {
+  rmSetup();
+  std::string e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":2", "Kode-8899"));
+  CHECK(e.find("\"ok\"") != std::string::npos && activePreset == 2, "preset bertanda tangan ditolak: %s", e.c_str());
+  e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":0", "Kode-8899", rmQ));   // q sama → replay
+  CHECK(e.find("stale") != std::string::npos && activePreset == 2, "replay diterima: %s", e.c_str());
+  std::string old = rmCmd("\"cmd\":\"preset\",\"id\":0", "Kode-8899");
+  strcpy(rmNonce, "ffffffffffffffff");                                 // modul reconnect → nonce baru
+  e = rmSend(old);
+  CHECK(e.find("stale") != std::string::npos && activePreset == 2, "nonce lama diterima: %s", e.c_str());
+  e = rmSend("{\"cmd\":\"preset\",\"id\":0}");                           // tanpa tanda tangan
+  CHECK(activePreset == 2, "preset tanpa tanda tangan diterima");
+  for (const char *c : {"\"cmd\":\"security\",\"code\":\"Kode-8899\",\"newcode\":\"x1234567\"", "\"cmd\":\"wifi\",\"ssid\":\"x\"", "\"cmd\":\"remote\",\"code\":\"Kode-8899\",\"on\":false", "\"cmd\":\"rinfo\""}) {
+    e = rmSend(rmCmd(c, "Kode-8899"));
+    CHECK(e.find("local_only") != std::string::npos, "perintah lokal-saja diterima lewat remote: %s", c);
+  }
+  CHECK(accessCode == "Kode-8899" && rmOn, "pengaturan berubah lewat remote");
+  e = rmSend(rmCmd("\"cmd\":\"manual\",\"axle\":\"front\",\"action\":\"fill\"", "Kode-8899"));
+  CHECK(e.find("no_manual_remote") != std::string::npos && !axF.manual, "isi manual lewat internet diterima: %s", e.c_str());
+  e = rmSend(rmCmd("\"cmd\":\"set\",\"axle\":\"rear\",\"psi\":999", "Kode-8899"));
+  CHECK(presets[2].rear == BAG_MAX, "batas PSI tidak berlaku lewat remote (%d)", presets[2].rear);
+}
+
+// 0.3.2+: kunci salah kode per klien. Remote: per id klien "c", kolam slot sendiri (tidak mengunci BLE/WiFi lokal).
+static void t_remote_lockout_per_client() {
+  rmSetup();
+  std::string e;
+  for (int i = 0; i < 5; i++) e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":0", "tebak" + std::to_string(i), 0, "penyerang1"));
+  CHECK(e.find("locked") != std::string::npos && lockLeftMs(rmClientKey("penyerang1")) > 25000, "5x tanda tangan salah tidak mengunci klien itu: %s", e.c_str());
+  e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":0", "Kode-8899", 0, "penyerang1"));
+  CHECK(e.find("locked") != std::string::npos && activePreset == 1, "kode benar diterima saat klien terkunci: %s", e.c_str());
+  e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":2", "Kode-8899"));
+  CHECK(e.find("\"ok\"") != std::string::npos && activePreset == 2, "BUG: penyerang remote mengunci HP pemilik (klien lain): %s", e.c_str());
+  auto r = post("{\"cmd\":\"auth\",\"code\":\"Kode-8899\"}");
+  CHECK(r["ev"] == "auth_ok", "BUG: penyerang remote mengunci WiFi lokal: %s", http.lastBody.c_str());
+  bleConnect();
+  auto b = ble("{\"cmd\":\"auth\",\"code\":\"Kode-8899\"}");
+  CHECK(b["ev"] == "auth_ok", "BUG: penyerang remote mengunci Bluetooth");
+  // penyerang WiFi lokal tidak mengunci remote
+  for (int i = 0; i < 5; i++) post("{\"cmd\":\"auth\",\"code\":\"0000\"}", IP_ATK);
+  e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":1", "Kode-8899"));
+  CHECK(e.find("\"ok\"") != std::string::npos, "penyerang WiFi lokal mengunci remote: %s", e.c_str());
+  // STOP tetap jalan untuk klien yang terkunci
+  setPsi(150, 20, 20); run(200);
+  rmSend("{\"cmd\":\"stop\",\"r\":\"s\"}");
+  CHECK(!anyValve() && levelHold, "STOP remote ditolak saat terkunci");
+  // bertingkat: salah lagi setelah kunci habis → 60 dtk
+  run(31000);
+  rmSend(rmCmd("\"cmd\":\"preset\",\"id\":0", "salah", 0, "penyerang1"));
+  CHECK(lockLeftMs(rmClientKey("penyerang1")) > 55000, "kunci remote tidak bertingkat (%u ms)", (unsigned)lockLeftMs(rmClientKey("penyerang1")));
+}
+
+// Penyerang lewat broker berganti-ganti id klien: tebakan tetap dibatasi kolam slot remote; lokal tidak terganggu.
+static void t_remote_client_rotation() {
+  rmSetup();
+  long checked = 0;
+  for (int round = 0; round < 20; round++) {
+    for (int k = 0; k < 30; k++) {
+      std::string e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":0", "x", 0, "atk" + std::to_string(round * 30 + k)));
+      if (e.find("bad_code") != std::string::npos) checked++;
+    }
+    run(30000);
+  }
+  for (size_t p = 0; (p = sim::serialLog.find("kode salah berulang dari internet", p)) != std::string::npos; p++) checked++;
+  fprintf(stderr, "    (penyerang 600 id klien: %ld tebakan dicek dalam 10 menit)\n", checked);
+  CHECK(checked <= 60, "penyerang berganti id klien bisa menebak %ld kali", checked);
+  CHECK(activePreset == 1, "preset berubah oleh penyerang");
+  auto r = post("{\"cmd\":\"auth\",\"code\":\"Kode-8899\"}");
+  CHECK(r["ev"] == "auth_ok", "WiFi lokal ikut terkunci oleh penyerang remote");
+}
+
+// STOP dari remote tersimpan di flash (0.3.2) → tetap berlaku setelah restart; preset remote menghapusnya.
+static void t_remote_hold_persist() {
+  rmSetup();
+  setPsi(150, 20, 20); run(300);
+  rmSend("{\"cmd\":\"stop\"}");
+  CHECK(sim::nvs["rzm"]["hold"] == std::vector<uint8_t>{1}, "STOP remote tidak disimpan ke NVS");
+  sim::now += 5000; setup(); run(3000);
+  CHECK(levelHold && !anyValve(), "BUG: setelah restart leveling jalan lagi padahal STOP remote aktif");
+  strcpy(rmNonce, "0123456789abcdef"); rmState = 3; rmLastQ = 0; rmQ = 0; rmEvents();
+  rmForcePub = true; run(5);
+  CHECK(std::string(rmStatusBuf).find("\"hold\":true") != std::string::npos, "telemetri remote tidak membawa hold: %s", rmStatusBuf);
+  std::string e = rmSend(rmCmd("\"cmd\":\"theme\",\"id\":0", "Kode-8899")); run(1000);
+  CHECK(levelHold && !anyValve(), "perintah remote lain membatalkan STOP hold");
+  e = rmSend(rmCmd("\"cmd\":\"preset\",\"id\":1", "Kode-8899")); run(300);
+  CHECK(!levelHold && on(PIN_FILL_F) && sim::nvs["rzm"]["hold"] == std::vector<uint8_t>{0}, "preset remote tidak menghapus hold: %s", e.c_str());
+}
+
+static void t_remote_stop_hold() {
+  rmSetup();
+  setPsi(150, 20, 20); run(200);
+  CHECK(on(PIN_FILL_F) && on(PIN_FILL_R), "harusnya mengisi");
+  std::string e = rmSend("{\"cmd\":\"stop\",\"r\":\"s\"}");                // STOP tanpa tanda tangan
+  CHECK(!anyValve() && levelHold && e.find("stop_ok") != std::string::npos, "STOP remote tidak menutup katup: %s", e.c_str());
+  run(5000);
+  CHECK(!anyValve(), "BUG: leveling membuka katup lagi setelah STOP remote");
+  rmSend(rmCmd("\"cmd\":\"theme\",\"id\":2", "Kode-8899")); run(2000);
+  CHECK(!anyValve() && levelHold, "perintah lain (tema) membatalkan STOP hold");
+  rmSend(rmCmd("\"cmd\":\"preset\",\"id\":1", "Kode-8899")); run(200);
+  CHECK(!levelHold && on(PIN_FILL_F), "preset remote harus melanjutkan leveling");
+  // STOP remote juga melepas tombol manual lokal yang sedang ditahan
+  bleConnect(); ble("{\"cmd\":\"auth\",\"code\":\"Kode-8899\"}");
+  setPsi(150, 50, 55); run(300);
+  ble("{\"cmd\":\"manual\",\"axle\":\"rear\",\"action\":\"dump\"}"); run(300);
+  CHECK(on(PIN_DUMP_R), "manual lokal tidak jalan");
+  rmSend("{\"cmd\":\"stop\"}"); run(500);
+  CHECK(!anyValve() && !axR.manual, "STOP remote tidak membatalkan manual lokal");
+  // STOP masuk walau antrean perintah penuh
+  rmSend(rmCmd("\"cmd\":\"preset\",\"id\":1", "Kode-8899"));
+  setPsi(150, 20, 20); run(200);
+  std::string junk = rmCmd("\"cmd\":\"theme\",\"id\":1", "Kode-8899");
+  for (int i = 0; i < 6; i++) rmCallback(nullptr, (byte *)junk.data(), junk.size());
+  std::string st = "{\"cmd\":\"stop\"}";
+  rmCallback(nullptr, (byte *)st.data(), st.size());
+  run(1);
+  CHECK(!anyValve() && levelHold, "STOP hilang saat antrean penuh");
+}
+
 // ---- 0.3.2: kunci salah kode per klien ----
 static void t_lockout_per_client() {
   boot();
@@ -648,6 +828,12 @@ static const T TESTS[] = {
   {"validasi perintah wifi", t_wifi_cmd_validation},
   {"BLE tulis paralel (thread) vs loop()", t_ble_thread_race},
   {"fuzz 3000 langkah: isi+buang tidak bersamaan, STOP", t_fuzz_invariants},
+  {"remote: default mati, simpan, rahasia tidak bocor, reset BOOT", t_remote_config},
+  {"remote: tanda tangan HMAC, anti-replay, lokal-saja, manual ditolak", t_remote_signed_cmds},
+  {"remote: kunci salah kode per klien (kolam sendiri), STOP tetap jalan", t_remote_lockout_per_client},
+  {"remote: penyerang berganti id klien", t_remote_client_rotation},
+  {"remote: STOP tersimpan di NVS & setelah restart", t_remote_hold_persist},
+  {"remote: STOP hold + manual lokal + antrean penuh", t_remote_stop_hold},
 };
 
 int main(int argc, char **argv) {

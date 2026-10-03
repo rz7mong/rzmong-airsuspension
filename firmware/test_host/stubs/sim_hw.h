@@ -1,6 +1,13 @@
 // Stub perangkat keras/library untuk simulasi host firmware RZMONG.
 #pragma once
 #include "Arduino.h"
+#include "freertos_sim.h"
+#include <cctype>
+typedef uint8_t byte;
+namespace sim { extern uint32_t rnd; }
+inline uint32_t esp_random() { sim::rnd = sim::rnd * 1103515245u + 12345u; return sim::rnd; }
+class EspClass { public: uint32_t getFreeHeap() { return 150000; } };
+extern EspClass ESP;
 
 // ---------- I2C / SPI ----------
 class TwoWire { public: bool begin(int = -1, int = -1, uint32_t = 0) { return true; } };
@@ -64,6 +71,8 @@ class Preferences {
   int32_t getInt(const char *k, int32_t d = 0) { return getT(k, d); }
   size_t putUInt(const char *k, uint32_t v) { return putT(k, v); }
   uint32_t getUInt(const char *k, uint32_t d = 0) { return getT(k, d); }
+  size_t putUShort(const char *k, uint16_t v) { return putT(k, v); }
+  uint16_t getUShort(const char *k, uint16_t d = 0) { return getT(k, d); }
   size_t putBool(const char *k, bool v) { return putT(k, (uint8_t)v); }
   bool getBool(const char *k, bool d = false) { return getT(k, (uint8_t)d); }
   size_t putString(const char *k, const String &v) { if (!open || ro) return 0; sim::nvsWrites++; auto &x = (*m())[k]; x.assign(v.s.begin(), v.s.end()); x.push_back(0); return v.length(); }
@@ -179,6 +188,8 @@ class WiFiClass {
   int status() { return WL_DISCONNECTED; }
   IPAddress localIP() { return IPAddress(); }
   IPAddress softAPIP() { return IPAddress(192, 168, 4, 1); }
+  void macAddress(uint8_t *m) { const uint8_t x[6] = {0x24, 0x6f, 0x28, 0xaa, 0xbb, 0xcc}; memcpy(m, x, 6); }
+  int RSSI() { return -60; }
 };
 extern WiFiClass WiFi;
 class MDNSResponder { public: bool begin(const char *) { return true; } void addService(const char *, const char *, int) {} };

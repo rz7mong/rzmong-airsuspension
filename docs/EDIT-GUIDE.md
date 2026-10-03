@@ -16,22 +16,28 @@ web/                 Situs GitHub Pages
   assets/neon.css    Gaya halaman depan
   flash/             Web flasher (ESP Web Tools) + firmware/*.bin + manifest.json
   control/           Aplikasi kontroler (PWA). Dipakai juga oleh firmware (WiFi) dan APK
-    index.html, app.js, control.css   Halaman & logika kontroler (BLE/WiFi, preset, gauge)
-    theme.css, theme.js               Tema (neon/merah/terang/anime), maskot, efek tap
+    index.html, app.js, control.css   Halaman & logika kontroler (BLE/WiFi/Internet, preset, gauge, kartu Keamanan & Remote)
+    dash.js                           Tampilan DASHBOARD (mobil tampak atas, 4 balon, tangki, preset, ▲/▼ per as)
+    remote.js                         Jalur INTERNET: klien MQTT (wss) + tanda tangan HMAC-SHA256
+    theme.css, theme.js               Tema (neon/merah/terang/anime/karbon), maskot, efek tap
     cars.js                           Renderer mobil pixel: velg, livery, warna, latar, animasi
     cars-pixel.js                     DIBUAT OTOMATIS dari tools/pixel (sprite bodi mobil)
     sw.js                             Service worker (cache offline)
     icons/                            Ikon PWA (icon.svg + png 192/512)
     vendor/ble-native.js              DIBUAT OTOMATIS dari android/ble-entry.js (npm run bundle:ble)
+    vendor/mqtt.min.js                MQTT.js 5.x (MIT) dari npm, dimuat hanya saat jalur INTERNET dipakai
+  dashboard/index.html                Pintasan → control/?layout=dash
 firmware/
   rzmong_airsuspension/rzmong_airsuspension.ino   Firmware utama ESP32 (Arduino)
   rzmong_airsuspension/web_assets.h               DIBUAT OTOMATIS dari web/control (tools/embed_web.py)
+  rzmong_airsuspension/remote_ca.h                Root CA untuk MQTT TLS (remote internet)
   kalibrasi_sensor/                               Sketch kalibrasi sensor tekanan
   platformio.ini, merge_bin.sh                    Build PlatformIO + penggabung .bin
   test_host/                                      Simulasi firmware di PC (run.sh) + uji boot QEMU (qemu.sh)
 tools/
   embed_web.py       Bundel web/control → web_assets.h
-  mock_modul.py      Modul RZM-AIR tiruan (HTTP) untuk tes UI tanpa ESP32
+  mock_modul.py      Modul tiruan HTTP (uji kode akses, keamanan, kartu remote)
+  mock_remote.py     Modul tiruan MQTT (uji dashboard lewat jalur INTERNET, butuh mosquitto + paho-mqtt)
   uji_ui_mock.py     Uji UI headless (Playwright) terhadap mock_modul.py
   pixel/             Generator sprite mobil pixel (Python)
 android/             Proyek Capacitor (APK Android)
@@ -51,6 +57,9 @@ python3 -m http.server 8765
 Buka `http://localhost:8765/` (landing) atau `http://localhost:8765/control/` (kontroler, ada mode **DEMO** tanpa alat).
 Setelah mengubah file, lakukan *hard refresh* (Ctrl+Shift+R). Service worker kadang masih menyimpan versi lama.
 Buka DevTools (F12) → Console untuk memastikan tidak ada error merah.
+
+Tampilan: `http://localhost:8765/control/?layout=dash` (dashboard, default) atau `?layout=classic`. Pilihan tersimpan di `localStorage` `rzm.layout`.
+Uji jalur INTERNET tanpa hardware: lihat `docs/REMOTE.md` bagian *Uji tanpa hardware* (mosquitto + `tools/mock_remote.py`).
 
 ---
 
@@ -193,7 +202,7 @@ esptool.py --chip esp32 write_flash 0x0 rzmong-airsuspension-esp32-merged.bin
 1. **File → Preferences → Additional boards manager URLs**:
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
    Lalu **Boards Manager** → install **esp32 by Espressif** (2.0.x atau 3.x).
-2. **Library Manager**: Adafruit ADS1X15, Adafruit GFX Library, Adafruit GC9A01A, ArduinoJson (v7), WebSockets (Markus Sattler).
+2. **Library Manager**: Adafruit ADS1X15, Adafruit GFX Library, Adafruit GC9A01A, ArduinoJson (v7), WebSockets (Markus Sattler), PubSubClient (Nick O'Leary, untuk remote internet).
 3. Buka `firmware/rzmong_airsuspension/rzmong_airsuspension.ino`.
 4. **Tools**:
    - Board: **ESP32 Dev Module**
@@ -208,7 +217,7 @@ esptool.py --chip esp32 write_flash 0x0 rzmong-airsuspension-esp32-merged.bin
 ```bash
 arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-arduino-cli lib install "Adafruit ADS1X15" "Adafruit GFX Library" "Adafruit GC9A01A" "ArduinoJson" "WebSockets"
+arduino-cli lib install "Adafruit ADS1X15" "Adafruit GFX Library" "Adafruit GC9A01A" "ArduinoJson" "WebSockets" "PubSubClient"
 arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app firmware/rzmong_airsuspension
 arduino-cli upload  --fqbn esp32:esp32:esp32:PartitionScheme=huge_app -p /dev/ttyUSB0 firmware/rzmong_airsuspension
 ```
@@ -319,7 +328,7 @@ Perintah protokolnya (`auth`, `logout`, `security`) ada di `docs/PROTOKOL.md`.
 4. Di HP: lupakan/unpair `RZM-AIR`, sambungkan ulang, lalu segera ganti kredensial default.
 
 Mengubah pin atau lama tahan: konstanta `PIN_BOOT` (0 untuk ESP32 klasik/esp32dev; **9** untuk ESP32-C3), `PIN_LED`, dan
-`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode (per klien: Bluetooth / per IP WiFi): `AUTH_MAX_FAIL` (5), `AUTH_LOCK_MS` (30 dtk, berlipat tiap kunci),
+`BOOT_RESET_MS` (8000 ms) di bagian atas `rzmong_airsuspension.ino`. Proteksi tebak kode (per klien: Bluetooth / per IP WiFi / per id klien remote `RM_AUTH_SLOTS`): `AUTH_MAX_FAIL` (5), `AUTH_LOCK_MS` (30 dtk, berlipat tiap kunci),
 `AUTH_LOCK_MAX_MS` (15 mnt), `AUTH_DECAY_MS` (15 mnt), `AUTH_SLOTS` (1 BLE + 8 IP).
 
 ### Catatan keamanan
@@ -388,7 +397,40 @@ sungguhan, tegangan ACC, dan watchdog (restart saat loop macet). Lihat checklist
 
 ---
 
-## 12. Checklist sebelum push
+## 12. Dashboard & remote internet (firmware 0.4.0+)
+
+### Tampilan dashboard (`web/control/dash.js`)
+- Elemen HTML ada di `index.html` di dalam `<section class="card dash" id="dash">`; gaya di bagian bawah `control.css` (`.dash`, `.d-*`).
+- `html[data-layout="dash"]` menyembunyikan kartu klasik (HUD, gauge, mobil samping, preset, manual, diagram) dan menampilkan dashboard.
+  Kartu **OTOMATIS & TEMA**, **KEAMANAN**, **REMOTE INTERNET**, dan **LOG** tetap tampil di bawah judul *PENGATURAN*.
+- Gambar mobil tampak atas digambar di `buildCar()` (SVG, orisinal). Posisi 4 gelembung tekanan ada di array `CORNERS`.
+  Hardware hanya punya 2 sensor, jadi kiri & kanan satu as menampilkan angka yang sama.
+- `dash.js` tidak bicara langsung ke modul; semua lewat API dari `app.js` (`api.goPreset`, `api.setTarget`, `api.stop`, `api.state`, `api.conn()`),
+  jadi BLE, WiFi, dan Internet otomatis ikut. Tombol ▲/▼ mengubah target preset aktif 1 psi; perintah `set` dikirim 0,6 detik setelah jari berhenti
+  (firmware menyimpan ke flash setiap `set`).
+- Tema **Karbon Pro** (`data-theme="karbon"`) ada di `theme.css`/`theme.js`. Dashboard memakai variabel CSS, jadi semua tema lain tetap jalan.
+
+### Jalur INTERNET (`web/control/remote.js`)
+- `RZMRemote.create(hooks)` = transport ketiga di samping BLE & WiFi. Pengaturan broker HP disimpan di `localStorage` `rzm.remote`
+  (sandi hanya kalau "Simpan sandi" dicentang).
+- `vendor/mqtt.min.js` dimuat lazy. Update: `npm pack mqtt@5 && tar xzf mqtt-*.tgz && cp package/dist/mqtt.min.js web/control/vendor/`.
+  File ini **tidak** ikut `web_assets.h` (dari WiFi AP modul memang tidak ada internet), `dash.js` dan `remote.js` ikut.
+- SHA-256/HMAC ditulis sendiri (sinkron) supaya juga jalan di `http://192.168.4.1` yang tidak punya `crypto.subtle`.
+
+### Firmware
+- Konstanta di atas `rzmong_airsuspension.ino`: `RM_STATUS_MS` (1 dtk saat ada penonton), `RM_SLOW_MS` (30 dtk tanpa penonton),
+  `RM_IDLE_MS` (detak 5 menit), `RM_LIVE_MS` (60 dtk), `RM_MSG_MAX`, `RM_TASK_STACK`.
+- Library: `knolleary/PubSubClient` + `WiFiClientSecure` (mbedTLS bawaan core). Arduino IDE: pasang **PubSubClient** dari Library Manager.
+- MQTT jalan di task FreeRTOS `rzm-remote` (core 0). Perintah masuk lewat antrean `rmInQ` → diproses di `loop()` (`pollRemote()`),
+  telemetri keluar lewat `rmStatusBuf`. Jangan memanggil fungsi katup dari `rmCallback` (itu jalan di task MQTT).
+- Pengaturan di NVS namespace **`rzmrm`**: `on`, `host`, `port`, `user`, `pass`, `id`. Reset BOOT hanya mematikan `on`.
+- Broker dengan CA lain: tambahkan PEM root-nya ke `remote_ca.h` (beberapa sertifikat boleh digabung), build ulang.
+- Ukuran (esp32dev, `huge_app.csv`): firmware 0.4.0 ±1,92 MB dari 3 MB (0.3.0: ±1,76 MB). RAM statis ±65,7 KB;
+  saat online TLS memakai ±40–50 KB heap tambahan. Serial mencetak `heap` saat menyambung, dan telemetri membawa `heap` (KB).
+
+---
+
+## 13. Checklist sebelum push
 
 - [ ] Tes di `localhost`, dan Console tidak menampilkan error
 - [ ] Jika sprite berubah: `python3 tools/pixel/gen_pix.py`

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#05070d" />
-  <meta name="description" content="Kontroler suspensi udara 2 titik RZMONG Airsuspension lewat Bluetooth." />
+  <meta name="description" content="Dashboard & kontroler suspensi udara RZMONG Airsuspension lewat Bluetooth, WiFi, atau internet (remote)." />
   <title>RZMONG Airsuspension — Kontroler</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
@@ -21,6 +21,10 @@
       <span><small>KONTROLER 2 TITIK</small><b>RZMONG Airsuspension</b></span>
     </a>
     <div class="top-actions">
+      <div class="seg layout-seg" role="group" aria-label="Tampilan">
+        <button id="layoutDash" title="Tampilan dashboard">▦<span> DASHBOARD</span></button>
+        <button id="layoutClassic" title="Tampilan klasik (HUD, diagram, mobil samping)">◎<span> KLASIK</span></button>
+      </div>
       <span data-theme-picker></span>
       <span class="pill" id="status" data-s="demo"><i></i><span id="statusText">DEMO</span></span>
       <button class="btn neon" id="connect"><span class="emo">📡</span><i class="ico" data-ico="ble"></i> <span id="connectText">SAMBUNGKAN</span></button>
@@ -30,15 +34,71 @@
     <div class="seg" role="tablist" aria-label="Jalur koneksi">
       <button role="tab" data-link="ble" id="linkBle"><span class="emo">🔵</span><i class="ico" data-ico="ble"></i> BLUETOOTH</button>
       <button role="tab" data-link="wifi" id="linkWifi"><span class="emo">📶</span><i class="ico" data-ico="wifi"></i> WIFI</button>
+      <button role="tab" data-link="remote" id="linkNet"><span class="emo">🌐</span><i class="ico" data-ico="globe"></i> INTERNET</button>
     </div>
     <label class="wifi-host" id="wifiHostBox" hidden>
       <span>IP / host</span>
       <input id="wifiHost" inputmode="url" autocomplete="off" spellcheck="false" value="192.168.4.1" />
     </label>
+    <details class="net-box" id="netBox" hidden>
+      <summary><span class="emo">⚙️</span> Pengaturan broker internet di HP ini</summary>
+      <div class="net-grid">
+        <label class="span2"><span>Alamat broker (host atau URL wss)</span><input id="netHost" inputmode="url" autocomplete="off" spellcheck="false" placeholder="xxxx.ala.asia-southeast1.emqxsl.com" /></label>
+        <label><span>Port WebSocket (wss)</span><input id="netPort" inputmode="numeric" value="8084" placeholder="8084 EMQX · 8884 HiveMQ" /></label>
+        <label><span>ID perangkat</span><input id="netId" autocomplete="off" spellcheck="false" placeholder="dari kartu KEAMANAN" /></label>
+        <label><span>Username broker</span><input id="netUser" autocomplete="off" spellcheck="false" /></label>
+        <label><span>Sandi broker</span><input id="netPass" type="password" autocomplete="off" /></label>
+        <label class="lock-rem span2"><input type="checkbox" id="netRemember" checked /> Simpan sandi broker di HP ini</label>
+      </div>
+      <p class="hint">Pakai user broker khusus HP (bukan user modul). Kode akses tetap diminta sebelum kontrol. Panduan: <a href="https://github.com/rz7mong/rzmong-airsuspension/blob/main/docs/REMOTE.md">docs/REMOTE.md</a>.</p>
+    </details>
     <small class="link-hint" id="linkHint"></small>
   </div>
 
   <main class="layout">
+    <!-- DASHBOARD (gaya kontroler manifold: tangki, 4 sudut, preset, naik/turun per as). Desain orisinal RZMONG. -->
+    <section class="card dash" id="dash" aria-label="Dashboard">
+      <div class="d-top">
+        <div class="d-conn" id="dConn" data-s="demo"><i></i><div><b id="dConnT">DEMO</b><small id="dConnS">mode demo</small></div></div>
+        <div class="d-chip"><small>KONTAK</small><b id="dAcc">—</b></div>
+        <div class="d-chip"><small>KOMPRESOR</small><b id="dComp">MATI</b></div>
+        <div class="d-chip"><small id="dPresetN">PRESET 2</small><b id="dPreset">JALAN</b></div>
+      </div>
+      <div class="d-body">
+        <div class="d-stage">
+          <div class="d-axle front">
+            <button class="d-step" data-axle="front" data-d="-1" aria-label="Turunkan target depan">▼</button>
+            <div class="d-ax-read"><small>DEPAN</small><b><span id="dPf">50</span><em> psi target</em></b></div>
+            <button class="d-step" data-axle="front" data-d="1" aria-label="Naikkan target depan">▲</button>
+          </div>
+          <svg id="dCar" viewBox="0 0 320 420" role="img" aria-label="Mobil tampak atas dengan tekanan 4 balon"></svg>
+          <div class="d-axle rear">
+            <button class="d-step" data-axle="rear" data-d="-1" aria-label="Turunkan target belakang">▼</button>
+            <div class="d-ax-read"><small>BELAKANG</small><b><span id="dPr">55</span><em> psi target</em></b></div>
+            <button class="d-step" data-axle="rear" data-d="1" aria-label="Naikkan target belakang">▲</button>
+          </div>
+        </div>
+        <div class="d-side">
+          <div class="d-tank">
+            <svg id="dTankG" viewBox="0 0 200 120" aria-hidden="true"></svg>
+            <div class="d-tank-read"><b id="dTank">0</b><span>PSI TANGKI</span></div>
+          </div>
+          <p class="d-msg" id="dMsg" role="status">Siap.</p>
+          <div class="d-presets" id="dPresets">
+            <button class="d-pre" data-id="0"><i>1</i><b>PARKIR</b><small data-v="0">25/25</small></button>
+            <button class="d-pre" data-id="1"><i>2</i><b>JALAN</b><small data-v="1">50/55</small></button>
+            <button class="d-pre" data-id="2"><i>3</i><b>TINGGI</b><small data-v="2">75/80</small></button>
+          </div>
+          <div class="d-actions">
+            <button class="d-act" id="dDown"><span>▼▼</span>SEMUA TURUN</button>
+            <button class="d-act stop" id="dStop"><span>■</span>STOP</button>
+            <button class="d-act" id="dUp"><span>▲▲</span>SEMUA NAIK</button>
+          </div>
+          <p class="hint d-hint" id="dHint">▲/▼ mengubah target preset aktif 1 psi (tahan = cepat). Batas aman 15–110 psi.</p>
+        </div>
+      </div>
+    </section>
+    <h2 class="d-settings-h">PENGATURAN</h2>
     <!-- HUD utama -->
     <section class="card hud" id="hudCard" aria-label="HUD">
       <div class="card-head"><span><span class="emo">🛰️</span><i class="ico" data-ico="hud"></i> HUD</span><span><button class="mini" id="gpsBtn" title="Kecepatan dari GPS HP">📍 GPS</button> <span class="tag" id="accTag">SPEEDO</span></span></div>
@@ -178,6 +238,32 @@
       </details>
     </section>
 
+    <!-- Remote internet (MQTT TLS) — mati secara default -->
+    <section class="card remotecard" id="rmCard" aria-label="Remote internet">
+      <div class="card-head"><span><span class="emo">🌐</span><i class="ico" data-ico="globe"></i> REMOTE INTERNET</span><span class="tag sec-tag" id="rmTag">—</span></div>
+      <p class="hint">Kontrol dari mana saja lewat broker MQTT TLS milikmu (mis. EMQX Cloud Serverless, kuota gratis). Modul harus tersambung ke WiFi router/hotspot. <b>Jangan pakai broker publik/tes</b> — siapa pun bisa melihat & mengirim pesan. Panduan: <a href="https://github.com/rz7mong/rzmong-airsuspension/blob/main/docs/REMOTE.md">docs/REMOTE.md</a>.</p>
+      <form class="sec-form" id="rmForm" onsubmit="return false" autocomplete="off">
+        <label class="lock-rem"><input type="checkbox" id="rmOn" /> Aktifkan remote internet di modul</label>
+        <div class="sec-row">
+          <label><span>Host broker (TLS)</span><input id="rmHost" autocomplete="off" spellcheck="false" placeholder="xxxx.ala.asia-southeast1.emqxsl.com" /></label>
+          <label><span>Port TLS</span><input id="rmPort" inputmode="numeric" value="8883" /></label>
+        </div>
+        <div class="sec-row">
+          <label><span>Username modul</span><input id="rmUser" autocomplete="off" spellcheck="false" /></label>
+          <label><span>Sandi modul</span><input id="rmPass" type="password" autocomplete="new-password" placeholder="kosong = tidak diganti" /></label>
+        </div>
+        <label><span>Kode akses saat ini <em>wajib</em></span><input id="rmCode" type="password" autocomplete="current-password" placeholder="••••" /></label>
+        <label class="lock-rem"><input type="checkbox" id="rmNewId" /> Buat ID perangkat baru (HP lama harus diisi ulang)</label>
+        <div class="rm-id"><small>ID perangkat</small><code id="rmId">—</code></div>
+        <div class="sec-actions">
+          <button type="button" class="btn neon" id="rmSave"><span class="emo">💾</span> SIMPAN KE MODUL</button>
+          <button type="button" class="btn" id="rmCopy"><span class="emo">📋</span> PAKAI DI HP INI</button>
+        </div>
+        <p class="hint" id="rmHint"></p>
+        <p class="sec-msg" id="rmMsg" role="status"></p>
+      </form>
+    </section>
+
     <!-- Diagram hardware yang bisa diketuk (fitur Grok) -->
     <section class="card hw" aria-label="Diagram hardware">
       <div class="card-head"><span><span class="emo">🧰</span><i class="ico" data-ico="esp"></i> KETUK HARDWARE</span><span class="tag">INTERAKTIF</span></div>
@@ -210,9 +296,11 @@
       <small class="lock-foot">Default kode <code>1234</code> · PIN pairing Bluetooth <code>123456</code> · lupa? tahan BOOT 8 dtk</small>
     </form>
   </div>
-  <footer class="foot">RZMONG Airsuspension · BLE <code>RZM-AIR</code> · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
+  <footer class="foot">RZMONG Airsuspension · BLE <code>RZM-AIR</code> · remote MQTT · <a href="../flash/"><span class="emo">⚡</span><i class="ico" data-ico="flash"></i> Flash firmware</a> · <a href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a></footer>
   <script src="cars-pixel.js"></script>
   <script src="cars.js"></script>
+  <script src="remote.js"></script>
+  <script src="dash.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

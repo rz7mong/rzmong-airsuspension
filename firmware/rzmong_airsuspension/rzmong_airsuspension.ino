@@ -16,6 +16,10 @@
 #include <ESPmDNS.h>
 #include <WebSocketsServer.h>  // library "WebSockets" oleh Markus Sattler (links2004)
 #include "web_assets.h"        // kontroler web (gzip), dibuat oleh tools/embed_web.py
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>      // library "PubSubClient" oleh Nick O'Leary (knolleary)
+#include <mbedtls/md.h>
+#include "remote_ca.h"         // root CA untuk MQTT TLS
 #include <mutex>
 #include <atomic>
 
@@ -59,7 +63,7 @@
 #define TX_UUID "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 // WiFi: SoftAP selalu aktif, STA (router/hotspot) opsional lewat perintah {"cmd":"wifi",...}
-#define FW_VERSION "0.3.2"
+#define FW_VERSION "0.4.0"
 
 #define AP_SSID "RZMONG-AIR"
 #define AP_PASS_DEFAULT "rzmong123"
@@ -77,11 +81,28 @@
 #define AUTH_DECAY_MS 900000UL       // 15 menit tanpa salah → hitungan klien itu kembali nol
 #define AUTH_SLOTS 9                 // slot 0 = Bluetooth, 1..8 = alamat IP klien WiFi (HTTP + WebSocket)
 #define KEY_BLE 0xFFFFFFFFu          // kunci slot Bluetooth (bukan alamat IP yang mungkin)
+// Remote internet (0.4.0+): klien web/app dibedakan per "c" (id klien acak yang disimpan di HP) dan punya
+// kolam slot SENDIRI → penebak lewat internet tidak bisa mengunci pemilik di Bluetooth/WiFi lokal, dan sebaliknya.
+// Kunci remote = 0xFE00xx00: sebagai IPv4 (byte rendah = oktet pertama di ESP32) berarti 0.x.x.254 → mustahil jadi IP klien.
+#define RM_AUTH_SLOTS 4
+#define KEY_RM_ANON 0xFE000000u
 // Tombol BOOT papan ESP32 DevKit (esp32dev) = GPIO0, aktif-low. ESP32-C3 = GPIO9 (ubah kalau ganti papan).
 // Hanya dibaca saat firmware sudah jalan; menahan BOOT ketika dinyalakan tetap masuk mode download.
 #define PIN_BOOT 0
 #define PIN_LED 2                    // LED biru bawaan DevKit (kalau ada)
 #define BOOT_RESET_MS 8000           // tahan BOOT 8 detik → reset kredensial ke default
+
+// ---------- Remote internet (MQTT lewat TLS, firmware 0.4.0+) — MATI secara default ----------
+// Modul (mode STA ke WiFi router/hotspot) → broker MQTT TLS port 8883 (mis. EMQX Cloud Serverless / HiveMQ Cloud).
+// Web/aplikasi → broker yang sama lewat MQTT-over-WebSocket aman (wss: EMQX 8084, HiveMQ 8884).
+// Topik: rzm/<id>/status (retained), rzm/<id>/online (retained, LWT "0"), rzm/<id>/cmd, rzm/<id>/evt.
+// Setiap perintah remote ditandatangani HMAC-SHA256 dengan kode akses (kecuali STOP). Lihat docs/REMOTE.md.
+#define RM_MSG_MAX 480               // panjang maksimal pesan perintah dari broker
+#define RM_STATUS_MS 1000            // telemetri "live" paling cepat 1x/detik (hanya kalau ada perubahan)
+#define RM_SLOW_MS 30000             // tanpa penonton: paling cepat tiap 30 detik (hemat kuota broker)
+#define RM_IDLE_MS 300000            // detak minimal tiap 5 menit walau tidak berubah
+#define RM_LIVE_MS 60000             // web/app kirim {"cmd":"live"} tiap ±20 dtk → mode live 60 dtk
+#define RM_TASK_STACK 10240          // stack task MQTT (TLS butuh ruang)
 
 Adafruit_ADS1115 ads;
 Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_RST);
@@ -121,7 +142,7 @@ struct Axle {
   const char *latched;   // "bocor" / "buang macet" → katup as ini dikunci tutup sampai preset dipilih lagi
   uint8_t manual;        // ManualAct
   uint32_t manualAt;
-  uint8_t manualBy;      // pemilik perintah manual: 0 BLE, 1..8 WebSocket, 255 HTTP
+  uint8_t manualBy;      // pemilik perintah manual: 0 BLE, 1..8 WebSocket, 254 remote, 255 HTTP
 };
 Axle axF = {"depan", PIN_FILL_F, PIN_DUMP_F, false, false, 0, nullptr, MAN_NONE, 0, 0};
 Axle axR = {"belakang", PIN_FILL_R, PIN_DUMP_R, false, false, 0, nullptr, MAN_NONE, 0, 0};
@@ -144,16 +165,17 @@ uint32_t btPin = BT_PIN_DEFAULT;
 // WebSocket dari IP yang sama berbagi slot, jadi ganti jalur / sambung ulang tidak mereset hitungan).
 // Penyerang di WiFi hanya mengunci dirinya sendiri, tidak bisa mengunci pemilik di Bluetooth atau IP lain.
 struct AuthSlot { uint32_t key; bool used; uint8_t fails; uint8_t level; uint32_t lockUntil; uint32_t lastFail; };
-AuthSlot authSlots[AUTH_SLOTS];
+AuthSlot authSlots[AUTH_SLOTS + RM_AUTH_SLOTS];   // [0] BLE · [1..8] IP WiFi · [9..12] klien remote
 uint32_t apRestartAt = 0;        // >0 → SoftAP dinyalakan ulang dengan sandi baru pada millis() ini
 uint32_t bootHoldMs = 0;         // lama tombol BOOT ditahan (untuk layar)
 uint32_t resetNoticeUntil = 0;   // tampilkan "KREDENSIAL DIRESET" di layar sampai waktu ini
 
 // Satu sesi per koneksi: BLE (satu HP), tiap klien WebSocket, dan tiap request HTTP.
-struct Session { bool authed; const char *ev; uint32_t key; };  // key = KEY_BLE atau alamat IP klien
-Session bleSession = {false, nullptr, KEY_BLE};
+struct Session { bool authed; const char *ev; uint32_t key; bool info; };  // key = KEY_BLE / alamat IP / KEY_REMOTE…; info → kirim id remote sekali
+Session bleSession = {false, nullptr, KEY_BLE, false};
 #define WS_SLOTS 8
 Session wsSession[WS_SLOTS];
+Session rmSession = {true, nullptr, KEY_RM_ANON, false};   // perintah remote internet (sudah lolos HMAC per pesan)
 
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
@@ -377,6 +399,11 @@ void resumeLeveling() {
 
 void buildStatus(JsonDocument &doc, Session *s = nullptr);
 void applyWifiSta();
+void handleRemoteCfg(JsonDocument &doc, Session &s);
+void remoteDisableAfterReset();
+uint8_t rmStateCode();
+const char *rmIdForStatus();
+bool rmIsOn();
 
 // ---------- kredensial ----------
 bool sameSecret(const String &a, const char *b) {
@@ -455,6 +482,7 @@ void factoryResetCredentials() {
   applyBtPin();
   clearBleBonds();
   logoutAll();
+  remoteDisableAfterReset();  // remote internet dimatikan (kode kembali 1234 → tidak aman dibiarkan online)
   apRestartAt = deadlineIn(500);
   resetNoticeUntil = deadlineIn(4000);
   bleSession.ev = "reset";
@@ -471,12 +499,17 @@ bool slotIdle(const AuthSlot &a, uint32_t now) {
   return (a.lockUntil == 0 || (int32_t)(a.lockUntil - now) <= 0) && (int32_t)(now - a.lastFail) > (int32_t)AUTH_DECAY_MS;
 }
 
+bool isRemoteKey(uint32_t key) { return (key & 0xFF0000FFu) == KEY_RM_ANON; }
+// Kolam slot: WiFi [1, AUTH_SLOTS), remote [AUTH_SLOTS, AUTH_SLOTS + RM_AUTH_SLOTS).
+int slotLo(uint32_t key) { return isRemoteKey(key) ? AUTH_SLOTS : 1; }
+int slotHi(uint32_t key) { return isRemoteKey(key) ? AUTH_SLOTS + RM_AUTH_SLOTS : AUTH_SLOTS; }
+
 // Cari slot klien. create=true → ambil slot idle kalau belum ada. nullptr = tidak ada / tabel penuh oleh klien yang dihukum.
 AuthSlot *authSlot(uint32_t key, bool create) {
   if (key == KEY_BLE) { authSlots[0].key = KEY_BLE; authSlots[0].used = true; return &authSlots[0]; }
   uint32_t now = millis();
   AuthSlot *idle = nullptr;
-  for (int i = 1; i < AUTH_SLOTS; i++) {
+  for (int i = slotLo(key); i < slotHi(key); i++) {
     AuthSlot &a = authSlots[i];
     if (a.used && a.key == key) return &a;
     if (!idle && slotIdle(a, now)) idle = &a;
@@ -498,20 +531,23 @@ uint32_t lockLeftMs(uint32_t key) {
   AuthSlot *a = authSlot(key, false);
   if (a) return slotLockLeft(a);
   uint32_t now = millis();
-  for (int i = 1; i < AUTH_SLOTS; i++) if (slotIdle(authSlots[i], now)) return 0;
+  for (int i = slotLo(key); i < slotHi(key); i++) if (slotIdle(authSlots[i], now)) return 0;
   return AUTH_LOCK_MS;
 }
 
 // Cek kode; hitung salah per klien. Setelah dikunci sekali, tiap salah berikutnya (dalam 15 menit) langsung
 // mengunci lagi 2× lebih lama: 30 dtk, 1, 2, 4, 8, lalu maks 15 menit.
-bool checkCode(const char *code, Session &s) {
+bool authVerdict(Session &s, bool good);
+bool checkCode(const char *code, Session &s) { return authVerdict(s, sameSecret(accessCode, code)); }
+// Inti hitung salah per klien; dipakai kode akses lokal DAN tanda tangan HMAC remote (good = tanda tangan cocok).
+bool authVerdict(Session &s, bool good) {
   AuthSlot *a = authSlot(s.key, true);
   if (!a) { s.ev = "locked"; return false; }
   uint32_t now = millis();
   if (slotLockLeft(a)) { s.ev = "locked"; return false; }
   // lastFail = saat salah terakhir, atau akhir kunci terakhir (bisa di masa depan) → peluruhan dihitung dari situ.
   if (a->lastFail && (int32_t)(now - a->lastFail) > (int32_t)AUTH_DECAY_MS) { a->fails = 0; a->level = 0; }
-  if (sameSecret(accessCode, code)) { a->fails = 0; a->level = 0; a->lastFail = 0; return true; }
+  if (good) { a->fails = 0; a->level = 0; a->lastFail = 0; return true; }
   a->lastFail = now ? now : 1;
   if (++a->fails >= AUTH_MAX_FAIL || a->level > 0) {
     uint32_t dur = AUTH_LOCK_MS << (a->level < 5 ? a->level : 5);
@@ -521,7 +557,7 @@ bool checkCode(const char *code, Session &s) {
     a->lockUntil = deadlineIn(dur);
     a->lastFail = a->lockUntil;
     s.ev = "locked";
-    Serial.printf("Akses: kode salah berulang dari %s, dikunci %u dtk\n", s.key == KEY_BLE ? "Bluetooth" : "WiFi", (unsigned)(dur / 1000));
+    Serial.printf("Akses: kode salah berulang dari %s, dikunci %u dtk\n", s.key == KEY_BLE ? "Bluetooth" : isRemoteKey(s.key) ? "internet" : "WiFi", (unsigned)(dur / 1000));
   } else s.ev = "bad_code";
   return false;
 }
@@ -568,6 +604,7 @@ void handleSecurity(JsonDocument &doc, Session &s) {
 uint8_t sessionOwner(const Session &s) {
   if (&s == &bleSession) return 0;
   if (&s >= wsSession && &s < wsSession + WS_SLOTS) return 1 + (&s - wsSession);
+  if (&s == &rmSession) return 254;  // remote internet (isi/buang manual ditolak di rmHandle)
   return 255;  // HTTP (tanpa koneksi tetap) → hanya dibatasi MANUAL_MAX_MS
 }
 
@@ -583,12 +620,14 @@ void handleLine(const String &line, Session &s) {
   }
   if (!strcmp(cmd, "logout")) { s.authed = false; s.ev = "logout"; return; }
   if (!strcmp(cmd, "security")) { handleSecurity(doc, s); return; }
+  if (!strcmp(cmd, "remote")) { handleRemoteCfg(doc, s); return; }   // atur remote internet (wajib "code")
   // Perintah kontrol lain boleh menyertakan "code" langsung (berguna untuk HTTP tanpa sesi).
   if (!s.authed && strcmp(cmd, "stop") && doc["code"].is<const char *>()) {
     if (checkCode(doc["code"], s)) s.authed = true;
     else return;
   }
   if (!s.authed && strcmp(cmd, "stop")) { s.ev = lockLeftMs(s.key) ? "locked" : "need_auth"; return; }
+  if (!strcmp(cmd, "rinfo")) { s.info = true; return; }   // minta id perangkat remote (sesi lokal terbuka)
   if (!strcmp(cmd, "preset")) {
     int id = doc["id"] | 1;
     activePreset = constrain(id, 0, 2);
@@ -682,7 +721,7 @@ void pollBle() {
   last = millis();
   JsonDocument doc;
   buildStatus(doc, &bleSession);
-  char buf[300];
+  char buf[400];
   size_t len = serializeJson(doc, buf, sizeof(buf) - 2);
   buf[len++] = '\n';
   buf[len] = 0;
@@ -703,11 +742,15 @@ void buildStatus(JsonDocument &doc, Session *s) {
   doc["pf"] = presets[activePreset].front;
   doc["pr"] = presets[activePreset].rear;
   doc["fault"] = fault;
+  doc["acc"] = accOn;                                // kontak/ACC
+  doc["rm"] = rmStateCode();                         // remote internet: 0 mati … 3 online (lihat PROTOKOL)
   if (levelHold) doc["hold"] = true;   // STOP aktif: leveling otomatis berhenti
   if (s) {
     doc["auth"] = s->authed;                         // sesi ini sudah memasukkan kode akses?
     if (s->authed) doc["def"] = credsAreDefault();   // masih pakai kredensial default (hanya ke sesi login)
     if (s->ev) { doc["ev"] = s->ev; s->ev = nullptr; }
+    if (s->info && s->authed) { doc["rid"] = rmIdForStatus(); doc["ron"] = rmIsOn(); }
+    s->info = false;
   }
   uint32_t lock = s ? lockLeftMs(s->key) : 0;  // sisa kunci untuk klien INI saja
   if (lock) doc["lock"] = (lock + 999) / 1000;      // detik sisa kunci salah kode
@@ -859,7 +902,7 @@ void setupWifi() {
   // HTTP tanpa sesi: body harus diawali {"cmd":"auth","code":"…"} (atau tiap perintah membawa "code").
   http.on("/api/cmd", HTTP_POST, []() {
     sendCors();
-    Session hs = {false, nullptr, (uint32_t)http.client().remoteIP()};
+    Session hs = {false, nullptr, (uint32_t)http.client().remoteIP(), false};
     String body = http.arg("plain");
     if (body.length() > 2048) { http.send(413, "text/plain", "terlalu besar"); return; }
     handleLines(body, hs);
@@ -900,6 +943,330 @@ void pollWifi() {
     String s = wifiStatusJson(&wsSession[i]) + "\n";
     ws.sendTXT(i, s);
   }
+}
+
+
+// ======================= Remote internet (MQTT lewat TLS) =======================
+// Desain: semua kerja jaringan yang bisa memblokir (DNS, TLS handshake, reconnect) jalan di task FreeRTOS
+// terpisah (core 0). loop() kontrol katup TIDAK pernah menunggu internet: perintah masuk lewat antrean,
+// telemetri keluar lewat buffer bersama. Tanpa internet, BLE dan WiFi AP lokal tetap jalan seperti biasa.
+struct RmMsg { uint16_t len; char data[RM_MSG_MAX]; };
+#define RM_EV_MAX 128
+Preferences rmPrefs;
+bool rmOn = false;                 // diatur lewat {"cmd":"remote",...} — default MATI
+String rmHost, rmUser, rmPass, rmId;
+uint16_t rmPort = 8883;
+volatile uint8_t rmState = 0;      // 0 mati · 1 tunggu WiFi router · 2 menyambung · 3 online · 4 gagal TLS/jaringan · 5 ditolak broker
+volatile bool rmStopReq = false;   // STOP dari remote (diproses duluan, walau antrean penuh)
+volatile uint32_t rmCfgGen = 1;    // naik setiap konfigurasi berubah → task menyambung ulang
+volatile bool rmForcePub = false;
+uint32_t rmLiveUntil = 0;          // >now → ada web/app yang sedang menonton → telemetri 1x/detik
+char rmNonce[17] = "";             // nonce sesi broker (baru tiap reconnect) — wajib ada di perintah bertanda tangan
+uint32_t rmLastQ = 0;              // nomor urut perintah terakhir yang diterima (anti-replay)
+QueueHandle_t rmInQ = nullptr, rmEvQ = nullptr;
+SemaphoreHandle_t rmLock = nullptr;
+char rmStatusBuf[480];
+volatile bool rmStatusDirty = false;
+WiFiClientSecure rmTls;
+PubSubClient rmMqtt(rmTls);
+
+uint8_t rmStateCode() { return rmOn ? rmState : 0; }
+const char *rmIdForStatus() { return rmId.c_str(); }
+bool rmIsOn() { return rmOn; }
+
+bool validHost(const String &h) {
+  if (h.length() < 3 || h.length() > 100) return false;
+  for (char c : h) if (!(isalnum((unsigned char)c) || c == '.' || c == '-')) return false;
+  return true;
+}
+bool validField(const String &v, size_t maxLen) {
+  if (v.length() > maxLen) return false;
+  for (char c : v) if (c < 0x20 || c > 0x7e) return false;
+  return true;
+}
+
+void rmNewId() {
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char b[24];
+  snprintf(b, sizeof(b), "%02x%02x%02x%02x%02x%02x-%08x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], (unsigned)esp_random());
+  rmId = b;
+  rmPrefs.putString("id", rmId);
+}
+
+void loadRemote() {
+  rmPrefs.begin("rzmrm", false);
+  rmOn = rmPrefs.getBool("on", false);
+  rmHost = rmPrefs.getString("host", "");
+  rmPort = rmPrefs.getUShort("port", 8883);
+  rmUser = rmPrefs.getString("user", "");
+  rmPass = rmPrefs.getString("pass", "");
+  rmId = rmPrefs.getString("id", "");
+  if (rmId.length() < 10) rmNewId();
+}
+
+void rmCallback(char *, byte *payload, unsigned int len) {
+  // Jalan di task MQTT: jangan sentuh katup/JSON besar di sini, cukup salin ke antrean.
+  if (len == 0 || len >= RM_MSG_MAX) return;
+  if (payload[0] == '{' && len < 64) {
+    char tmp[64];
+    memcpy(tmp, payload, len);
+    tmp[len] = 0;
+    if (strstr(tmp, "\"cmd\":\"stop\"")) rmStopReq = true;   // STOP tetap sampai walau antrean penuh
+  }
+  RmMsg *m = (RmMsg *)malloc(sizeof(RmMsg));
+  if (!m) return;
+  m->len = len;
+  memcpy(m->data, payload, len);
+  m->data[len] = 0;
+  if (xQueueSend(rmInQ, m, 0) != pdTRUE) Serial.println("Remote: antrean perintah penuh, dibuang");
+  free(m);
+}
+
+void rmTask(void *) {
+  uint32_t gen = 0, backoff = 2000, nextTry = 0, lastHeapLog = 0;
+  bool on = false;
+  String host, user, pass, id, tStatus, tOnline, tCmd, tEvt;
+  uint16_t port = 8883;
+  static char out[sizeof(rmStatusBuf)];
+  for (;;) {
+    if (gen != rmCfgGen) {
+      if (rmMqtt.connected()) { rmMqtt.publish(tOnline.c_str(), "0", true); rmMqtt.disconnect(); }
+      rmTls.stop();
+      xSemaphoreTake(rmLock, portMAX_DELAY);
+      gen = rmCfgGen; on = rmOn; host = rmHost; port = rmPort; user = rmUser; pass = rmPass; id = rmId;
+      xSemaphoreGive(rmLock);
+      String base = "rzm/" + id + "/";
+      tStatus = base + "status"; tOnline = base + "online"; tCmd = base + "cmd"; tEvt = base + "evt";
+      backoff = 2000; nextTry = 0;
+    }
+    if (!on || !host.length()) { rmState = 0; vTaskDelay(pdMS_TO_TICKS(300)); continue; }
+    if (WiFi.status() != WL_CONNECTED) {
+      if (rmMqtt.connected()) rmMqtt.disconnect();
+      rmState = 1;
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+    if (!rmMqtt.connected()) {
+      if (rmState == 3) { Serial.println("Remote: koneksi broker putus, coba lagi"); nextTry = millis() + 1000; rmState = 2; }
+      if ((int32_t)(millis() - nextTry) < 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }
+      rmState = 2;
+      Serial.printf("Remote: menyambung ke %s:%u (heap %u)\n", host.c_str(), port, (unsigned)ESP.getFreeHeap());
+      rmTls.stop();
+      rmTls.setCACert(RM_CA_PEM);
+      rmTls.setHandshakeTimeout(15);
+      rmMqtt.setServer(host.c_str(), port);
+      rmMqtt.setBufferSize(sizeof(rmStatusBuf) + 64);
+      rmMqtt.setKeepAlive(30);
+      rmMqtt.setSocketTimeout(10);
+      rmMqtt.setCallback(rmCallback);
+      char nonce[17];
+      snprintf(nonce, sizeof(nonce), "%08x%08x", (unsigned)esp_random(), (unsigned)esp_random());
+      String cid = "rzm-" + id;
+      if (rmMqtt.connect(cid.c_str(), user.c_str(), pass.c_str(), tOnline.c_str(), 1, true, "0")) {
+        xSemaphoreTake(rmLock, portMAX_DELAY);
+        memcpy(rmNonce, nonce, sizeof(rmNonce));
+        rmLastQ = 0;
+        xSemaphoreGive(rmLock);
+        rmMqtt.subscribe(tCmd.c_str(), 1);
+        rmMqtt.publish(tOnline.c_str(), "1", true);
+        rmState = 3;
+        rmForcePub = true;
+        backoff = 2000;
+        Serial.printf("Remote: ONLINE topik rzm/%s/… (heap %u)\n", id.c_str(), (unsigned)ESP.getFreeHeap());
+      } else {
+        int st = rmMqtt.state();
+        rmState = (st == MQTT_CONNECT_BAD_CREDENTIALS || st == MQTT_CONNECT_UNAUTHORIZED) ? 5 : 4;
+        Serial.printf("Remote: gagal (state %d), coba lagi %u dtk\n", st, (unsigned)(backoff / 1000));
+        nextTry = millis() + backoff;
+        backoff = min<uint32_t>(backoff * 2, 60000);
+      }
+      continue;
+    }
+    rmMqtt.loop();
+    if (rmStatusDirty) {
+      xSemaphoreTake(rmLock, portMAX_DELAY);
+      strlcpy(out, rmStatusBuf, sizeof(out));
+      rmStatusDirty = false;
+      xSemaphoreGive(rmLock);
+      rmMqtt.publish(tStatus.c_str(), out, true);
+    }
+    char ev[RM_EV_MAX];
+    while (xQueueReceive(rmEvQ, ev, 0) == pdTRUE) rmMqtt.publish(tEvt.c_str(), ev, false);
+    if (millis() - lastHeapLog > 300000) { lastHeapLog = millis(); Serial.printf("Remote: heap bebas %u\n", (unsigned)ESP.getFreeHeap()); }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void setupRemote() {
+  loadRemote();
+  rmInQ = xQueueCreate(4, sizeof(RmMsg));
+  rmEvQ = xQueueCreate(6, RM_EV_MAX);
+  rmLock = xSemaphoreCreateMutex();
+  // Core 0 (sama dengan stack WiFi); loop() Arduino di core 1 tidak ikut tertahan saat TLS handshake.
+  xTaskCreatePinnedToCore(rmTask, "rzm-remote", RM_TASK_STACK, nullptr, 1, nullptr, 0);
+  Serial.printf("Remote internet: %s · id %s\n", rmOn ? "AKTIF" : "mati (default)", rmId.c_str());
+}
+
+void rmEvent(const char *ev, const char *rid) {
+  if (!rmEvQ) return;
+  char b[RM_EV_MAX];
+  snprintf(b, sizeof(b), "{\"ev\":\"%s\",\"r\":\"%.24s\",\"q\":%u}", ev, rid ? rid : "", (unsigned)rmLastQ);
+  xQueueSend(rmEvQ, b, 0);
+}
+
+// HMAC-SHA256(kunci = kode akses, pesan = teks JSON persis seperti dikirim) → 64 karakter hex.
+void hmacHex(const String &key, const char *msg, size_t len, char out[65]) {
+  uint8_t mac[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), (const uint8_t *)key.c_str(), key.length(), (const uint8_t *)msg, len, mac);
+  for (int i = 0; i < 32; i++) snprintf(out + i * 2, 3, "%02x", mac[i]);
+}
+
+// STOP remote lewat jalur yang sama dengan STOP lokal (handleLine), supaya semantik STOP selalu identik.
+void rmStop() {
+  rmSession = {true, nullptr, KEY_RM_ANON, false};
+  handleLine("{\"cmd\":\"stop\"}", rmSession);
+}
+
+// Id klien remote ("c", maks 24 karakter dari web/app) → kunci slot 0xFE00xx00 (FNV-1a 16 bit). Tanpa "c" = klien anonim.
+uint32_t rmClientKey(const char *c) {
+  if (!c || !*c) return KEY_RM_ANON;
+  uint32_t h = 2166136261u;
+  for (int i = 0; c[i] && i < 24; i++) { h ^= (uint8_t)c[i]; h *= 16777619u; }
+  h = (h ^ (h >> 16)) & 0xFFFF;
+  return KEY_RM_ANON | ((h ? h : 1) << 8);
+}
+
+// Format pesan perintah remote:  "<hmac 64 hex> <json>"   (JSON berisi cmd, n = nonce, q = nomor urut, r = id balasan)
+// Pengecualian: {"cmd":"stop"} boleh TANPA tanda tangan (keselamatan).
+void rmHandle(const char *data, size_t len) {
+  if (data[0] == '{') {
+    JsonDocument d;
+    if (deserializeJson(d, data, len)) return;
+    const char *c = d["cmd"] | "";
+    if (!strcmp(c, "stop")) { rmStop(); rmEvent("stop_ok", d["r"] | ""); rmForcePub = true; }
+    // "live" hanya mempercepat telemetri (tanpa kontrol) → boleh tanpa tanda tangan.
+    else if (!strcmp(c, "live")) { if (!rmLiveUntil || (int32_t)(rmLiveUntil - millis()) < RM_LIVE_MS / 2) rmForcePub = true; rmLiveUntil = deadlineIn(RM_LIVE_MS); }
+    return;
+  }
+  if (len < 67 || data[64] != ' ') return;
+  const char *json = data + 65;
+  size_t jl = len - 65;
+  JsonDocument d;
+  if (deserializeJson(d, json, jl)) return;
+  const char *rid = d["r"] | "";
+  const char *cmd = d["cmd"] | "";
+  char nonce[17];
+  xSemaphoreTake(rmLock, portMAX_DELAY);
+  memcpy(nonce, rmNonce, sizeof(nonce));
+  xSemaphoreGive(rmLock);
+  if (strcmp(d["n"] | "", nonce)) { rmEvent("stale", rid); return; }   // nonce lama (modul reconnect) → UI ambil nonce baru
+  uint32_t q = d["q"] | 0;
+  if (q <= rmLastQ) { rmEvent("stale", rid); return; }                 // pesan diulang (replay) / urutan lama
+  // Kunci salah kode PER KLIEN remote (kolam slot sendiri, aturan sama dengan lokal: 5x → 30 dtk, lalu bertingkat s/d 15 mnt).
+  rmSession = {true, nullptr, rmClientKey(d["c"] | ""), false};
+  if (lockLeftMs(rmSession.key)) { rmEvent("locked", rid); return; }
+  char want[65];
+  hmacHex(accessCode, json, jl, want);
+  char got[65];
+  memcpy(got, data, 64);
+  got[64] = 0;
+  if (!authVerdict(rmSession, sameSecret(String(want), got))) { rmEvent(rmSession.ev ? rmSession.ev : "bad_code", rid); return; }
+  rmSession.ev = nullptr;
+  rmLastQ = q;
+  rmLiveUntil = deadlineIn(RM_LIVE_MS);
+  rmForcePub = true;
+  if (!strcmp(cmd, "security") || !strcmp(cmd, "wifi") || !strcmp(cmd, "remote") || !strcmp(cmd, "rinfo")) { rmEvent("local_only", rid); return; }
+  // Isi/buang manual lewat internet ditolak: kalau koneksi putus saat tombol ditahan, katup bisa terus terbuka.
+  if (!strcmp(cmd, "manual") && strcmp(d["action"] | "stop", "stop")) { rmEvent("no_manual_remote", rid); return; }
+  if (!strcmp(cmd, "auth")) { rmEvent("auth_ok", rid); return; }
+  if (!strcmp(cmd, "logout")) { rmEvent("logout", rid); return; }
+  String line;
+  line.reserve(jl);
+  for (size_t i = 0; i < jl; i++) line += json[i];
+  handleLine(line, rmSession);   // jalur sama dengan lokal: STOP hold, resumeLeveling, kunci bocor, batas PSI
+  rmEvent(rmSession.ev ? rmSession.ev : "ok", rid);
+  rmForcePub = true;
+  Serial.printf("Remote: perintah %s\n", cmd);
+}
+
+void pollRemote() {
+  if (!rmInQ) return;
+  if (rmStopReq) { rmStopReq = false; rmStop(); }
+  static RmMsg m;   // statis: 480 byte jangan di stack loop()
+  while (xQueueReceive(rmInQ, &m, 0) == pdTRUE) rmHandle(m.data, m.len);
+  static uint32_t lastBuild = 0, lastPub = 0;
+  static char lastSig[sizeof(rmStatusBuf)];
+  uint32_t now = millis();
+  bool live = rmLiveUntil && (int32_t)(rmLiveUntil - now) > 0;
+  if (rmState != 3 || (!rmForcePub && now - lastBuild < (live ? RM_STATUS_MS : 1000))) return;
+  lastBuild = now;
+  JsonDocument doc;
+  buildStatus(doc, nullptr);
+  char nonce[17];
+  xSemaphoreTake(rmLock, portMAX_DELAY);
+  memcpy(nonce, rmNonce, sizeof(nonce));
+  xSemaphoreGive(rmLock);
+  doc["n"] = nonce;
+  doc["q"] = rmLastQ;
+  doc["fw"] = FW_VERSION;
+  doc["sta"] = true;
+  char sig[sizeof(rmStatusBuf)];
+  serializeJson(doc, sig, sizeof(sig));
+  bool changed = strcmp(sig, lastSig) != 0;
+  if (!rmForcePub && !(changed && (live || now - lastPub >= RM_SLOW_MS)) && now - lastPub < RM_IDLE_MS) return;
+  strlcpy(lastSig, sig, sizeof(lastSig));
+  doc["up"] = now / 1000;
+  doc["rssi"] = WiFi.RSSI();
+  doc["heap"] = ESP.getFreeHeap() / 1024;
+  xSemaphoreTake(rmLock, portMAX_DELAY);
+  serializeJson(doc, rmStatusBuf, sizeof(rmStatusBuf));
+  rmStatusDirty = true;
+  xSemaphoreGive(rmLock);
+  rmForcePub = false;
+  lastPub = now;
+}
+
+// {"cmd":"remote","code":"<kode saat ini>","on":true,"host":"xxxx.ala.asia-southeast1.emqxsl.com","port":8883,"user":"…","pass":"…","newid":false}
+// Hanya dari sesi LOKAL (BLE / WiFi AP / HTTP). "pass" kosong = sandi lama dipakai. Host/user/sandi tidak pernah dikirim balik.
+void handleRemoteCfg(JsonDocument &doc, Session &s) {
+  if (!checkCode(doc["code"] | "", s)) return;
+  s.authed = true;
+  bool on = doc["on"] | rmOn;
+  String host = doc["host"].is<const char *>() ? String((const char *)doc["host"]) : rmHost;
+  String user = doc["user"].is<const char *>() ? String((const char *)doc["user"]) : rmUser;
+  String pass = doc["pass"] | "";
+  int port = doc["port"] | (int)rmPort;
+  host.trim();
+  host.toLowerCase();
+  if (host.length() && !validHost(host)) { s.ev = "bad_remote"; return; }
+  if (port < 1 || port > 65535 || !validField(user, 64) || !validField(pass, 64)) { s.ev = "bad_remote"; return; }
+  if (on && !host.length()) { s.ev = "bad_remote"; return; }
+  if (on && accessCode == ACCESS_CODE_DEFAULT) { s.ev = "rm_default_code"; return; }   // wajib ganti kode 1234 dulu
+  xSemaphoreTake(rmLock, portMAX_DELAY);
+  rmOn = on; rmHost = host; rmPort = port; rmUser = user;
+  if (pass.length()) rmPass = pass;
+  if (doc["newid"] | false) rmNewId();
+  rmCfgGen++;
+  xSemaphoreGive(rmLock);
+  rmPrefs.putBool("on", rmOn);
+  rmPrefs.putString("host", rmHost);
+  rmPrefs.putUShort("port", rmPort);
+  rmPrefs.putString("user", rmUser);
+  if (pass.length()) rmPrefs.putString("pass", rmPass);
+  s.ev = "saved";
+  s.info = true;
+  Serial.printf("Remote internet %s (host %s:%u)%s\n", rmOn ? "AKTIF" : "MATI", rmHost.c_str(), rmPort, staSsid.length() ? "" : " — isi WiFi router dulu (mode STA)!");
+}
+
+void remoteDisableAfterReset() {
+  if (!rmLock) return;
+  xSemaphoreTake(rmLock, portMAX_DELAY);
+  rmOn = false;
+  rmCfgGen++;
+  xSemaphoreGive(rmLock);
+  rmPrefs.putBool("on", false);
+  Serial.println("Remote internet dimatikan (reset kredensial). Aktifkan lagi di KEAMANAN setelah ganti kode akses.");
 }
 
 // Tahan tombol BOOT (GPIO0) 8 detik saat firmware jalan → reset kredensial. LED berkedip makin cepat,
@@ -998,6 +1365,7 @@ void setup() {
 #endif
 #ifndef RZM_SIM_QEMU  // QEMU juga tidak meniru PHY WiFi
   setupWifi();
+  setupRemote();
 #else
   prefs.begin("rzm", false);
   Serial.println("QEMU: BLE & WiFi dilewati (tidak diemulasikan)");
@@ -1037,6 +1405,7 @@ void loop() {
   pollBle();
 #ifndef RZM_SIM_QEMU
   pollWifi();
+  pollRemote();
 #endif
   updateFault();
 #ifdef RZM_SIM_QEMU

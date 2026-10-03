@@ -55,7 +55,7 @@
   <nav class="nav"><div class="wrap">
     <a class="brand" href="./"><span class="logo">RZ</span>RZMONG Airsuspension</a>
     <div class="nav-links">
-      <a class="hide-m" href="#fitur">Fitur</a><a href="control/">Kontroler</a><a href="flash/">Flash</a><a class="hide-m" href="#android">Android</a>
+      <a class="hide-m" href="#fitur">Fitur</a><a href="dashboard/">Dashboard</a><a class="hide-m" href="control/?layout=classic">Kontroler</a><a href="flash/">Flash</a><a class="hide-m" href="#android">Android</a>
       <a class="hide-m" href="https://github.com/rz7mong/rzmong-airsuspension">GitHub</a>
       <span data-theme-picker></span>
     </div>
@@ -63,11 +63,12 @@
 
   <header class="wrap hero">
     <div>
-      <div class="kicker">ESP32 · 2 TITIK · BLE + WIFI</div>
+      <div class="kicker">ESP32 · 2 TITIK · BLE + WIFI + REMOTE INTERNET</div>
       <h1>Suspensi udara,<br><span class="grad">dikendalikan dari HP.</span></h1>
-      <p>RZMONG Airsuspension adalah kontroler air suspension 2 titik open-source: tiga preset PSI, naik otomatis saat kontak hidup, turun saat mati, monitor tangki &amp; kompresor, layar bulat speedo, plus kontrol lewat Bluetooth atau WiFi.</p>
+      <p>RZMONG Airsuspension adalah kontroler air suspension 2 titik open-source: tiga preset PSI, naik otomatis saat kontak hidup, turun saat mati, monitor tangki &amp; kompresor, layar bulat speedo, plus kontrol lewat Bluetooth, WiFi, atau dari mana saja lewat internet (remote MQTT, opsional).</p>
       <div class="cta">
-        <a class="btn primary" href="control/">🕹️ BUKA KONTROLER</a>
+        <a class="btn primary" href="dashboard/">▦ BUKA DASHBOARD</a>
+        <a class="btn" href="control/?layout=classic">🕹️ KONTROLER KLASIK</a>
         <a class="btn" href="flash/">⚡ FLASH FIRMWARE</a>
         <a class="btn" href="https://github.com/rz7mong/rzmong-airsuspension/releases/latest">🤖 UNDUH APK</a>
       </div>
@@ -106,7 +107,7 @@
     <div class="kicker reveal">MULAI</div>
     <h2 class="reveal">Tiga halaman, satu sistem</h2>
     <div class="grid c3 links" style="margin-top:18px">
-      <a class="card reveal" href="control/"><span class="big">🕹️</span><h3>Kontroler</h3><span class="dim">Gauge live, preset, manual, diagram hardware interaktif, mode demo. Bisa dipasang sebagai PWA.</span></a>
+      <a class="card reveal" href="dashboard/"><span class="big">▦</span><h3>Dashboard &amp; Remote</h3><span class="dim">Tampilan mobil tampak atas dengan tekanan 4 balon, tangki, preset 1–3, naik/turun per as. Bisa dikontrol dari mana saja lewat internet (MQTT). Tampilan klasik tetap ada (gauge, diagram hardware, mode demo).</span></a>
       <a class="card reveal" href="flash/"><span class="big">⚡</span><h3>Flash Firmware</h3><span class="dim">Pasang firmware ke ESP32 langsung dari Chrome/Edge lewat USB, lengkap dengan serial monitor.</span></a>
       <a class="card reveal" id="android" href="https://github.com/rz7mong/rzmong-airsuspension/releases/latest"><span class="big">🤖</span><h3>APK Android</h3><span class="dim">Unduh dari Releases, atau ambil artifact <code>rzmong-air-debug-apk</code> di tab Actions.</span></a>
     </div>
@@ -120,7 +121,7 @@
         <li><span><b>4 solenoid NC.</b> <span class="dim">Isi/buang depan dan isi/buang belakang.</span></span></li>
         <li><span><b>3 sensor + ADS1115.</b> <span class="dim">Tangki, depan, belakang — 0–200 psi.</span></span></li>
         <li><span><b>ESP32 menjaga target.</b> <span class="dim">Isi atau buang sampai psi masuk deadband ±2.</span></span></li>
-        <li><span><b>HP mengatur preset.</b> <span class="dim">Lewat Bluetooth atau WiFi, status 4× per detik.</span></span></li>
+        <li><span><b>HP mengatur preset.</b> <span class="dim">Lewat Bluetooth atau WiFi (status 4× per detik), atau internet lewat broker MQTT TLS.</span></span></li>
       </ol>
     </div>
     <div class="card reveal">

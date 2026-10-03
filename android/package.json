@@ -1,6 +1,6 @@
 {
   "name": "rzmong-air-android",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Aplikasi Android RZMONG Airsuspension (Capacitor) — membungkus web/control dengan BLE native + WiFi.",
   "scripts": {

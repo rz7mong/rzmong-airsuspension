@@ -1,6 +1,7 @@
-# Protokol kontrol RZMONG Airsuspension (BLE & WiFi)
+# Protokol kontrol RZMONG Airsuspension (BLE, WiFi & Internet)
 
 Perintah dan status **sama persis** di Bluetooth dan WiFi: satu objek JSON per baris, diakhiri `\n`.
+Jalur **Internet** (firmware 0.4.0+, MQTT) memakai perintah & status yang sama, ditambah tanda tangan — lihat bagian *Remote internet*.
 
 ## Bluetooth LE
 
@@ -70,6 +71,10 @@ Setiap koneksi (BLE, tiap klien WebSocket, tiap request HTTP) mulai **terkunci**
 {"cmd":"stop"}                                  // semua katup tutup + leveling otomatis BERHENTI sampai preset dipilih
 {"cmd":"wifi","ssid":"Router","pass":"rahasia"} // WiFi STA; ssid ≤32, pass kosong atau 8–63 (selain itu bad_input)
 {"cmd":"wifi","appass":"sandiBaru8","code":"…"} // (lama) ganti sandi SoftAP; 0.3.2+: wajib "code" saat ini, berlaku ±2 detik
+{"cmd":"remote","code":"<kode saat ini>","on":true,"host":"x1y2z3.ala.asia-southeast1.emqxsl.com","port":8883,"user":"rzm-modul","pass":"…"}
+                                                // 0.4.0+: atur remote internet (hanya lewat BLE/WiFi lokal). "pass" kosong/tidak ada = sandi lama;
+                                                // "newid":true = buat ID perangkat baru. → ev saved / bad_remote / rm_default_code / bad_code
+{"cmd":"rinfo"}                                 // 0.4.0+: minta ID perangkat remote → status berikutnya membawa "rid" & "ron" (sesi terbuka)
 ```
 
 Semua perintah di atas kecuali `stop` butuh sesi yang sudah `auth`.
@@ -103,4 +108,38 @@ Field keamanan (firmware 0.3.0+): `auth` (bool, sesi ini terbuka?), `ev` (sekali
 `need_auth`, `saved`, `bad_newcode`, `bad_appass`, `bad_btpin`, `bad_input`, `logout`, `reset`), `def` (hanya ke sesi terbuka:
 masih ada kredensial default), `lock` (detik sisa kunci salah kode), `boot` (detik tombol BOOT sedang ditahan).
 `GET /api/status` tidak punya sesi, jadi tidak membawa `auth`/`ev`. **Kode, sandi, dan PIN tidak pernah ada di status.**
-UI juga siap membaca field opsional `speed` (km/j) dan `acc` (bool) kalau nanti firmware menambahkannya.
+Firmware 0.4.0+: `acc` (bool, kontak/ACC hidup), `rm` (remote internet: `0` mati, `1` tunggu WiFi router, `2` menyambung ke broker,
+`3` online, `4` gagal TLS/jaringan, `5` broker menolak user/sandi), dan — hanya sekali setelah `remote`/`rinfo` di sesi terbuka — `rid` (ID perangkat) & `ron` (remote aktif).
+Host/user/sandi broker **tidak pernah** dikirim. UI juga siap membaca field opsional `speed` (km/j) kalau nanti ada sensor kecepatan.
+
+## Remote internet (MQTT, firmware 0.4.0+)
+
+Mati secara default. Modul (mode STA) → broker MQTT **TLS port 8883** (root CA diverifikasi). Web/aplikasi → broker yang sama lewat
+**wss** (EMQX 8084, HiveMQ 8884, path `/mqtt`). Panduan pemasangan broker: `docs/REMOTE.md`.
+
+| Topik | Arah | Isi |
+|---|---|---|
+| `rzm/<id>/status` | modul → HP, **retained** | status JSON seperti di atas + `n` (nonce sesi broker, 16 hex), `q` (nomor urut terakhir yang diterima), `fw`, `sta`, `up` (detik), `rssi`, `heap` (KB) |
+| `rzm/<id>/online` | modul → HP, **retained** | `1` saat tersambung, `0` (Last Will) saat putus |
+| `rzm/<id>/cmd` | HP → modul | perintah bertanda tangan (lihat di bawah), QoS 1 |
+| `rzm/<id>/evt` | modul → HP | `{"ev":"…","r":"<id balasan>","q":<urut>}` |
+
+`<id>` = MAC modul (12 hex) + `-` + 8 hex acak, dibuat sekali dan disimpan di NVS `rzmrm`.
+
+**Format perintah:** `<HMAC-SHA256 64 hex huruf kecil><spasi><JSON>`
+
+```text
+JSON  = {"cmd":"preset","id":2,"n":"<n dari status>","q":<q terakhir + 1>,"r":"<id acak balasan>","c":"<id klien tetap per HP, maks 24>"}
+HMAC  = HMAC-SHA256(kunci = kode akses (byte ASCII), pesan = teks JSON persis seperti dikirim)
+```
+
+- Modul menolak kalau `n` ≠ nonce saat ini atau `q` ≤ urut terakhir → `ev":"stale"` (UI menandatangani ulang sekali dengan nonce baru).
+  Nonce berganti setiap modul (re)connect ke broker, jadi pesan rekaman lama tidak bisa diputar ulang.
+- Tanda tangan salah dihitung sebagai kode salah **per id klien `c`** dengan aturan yang sama seperti lokal (5× → `locked` 30 detik, lalu bertingkat s/d 15 menit).
+  Klien remote punya kolam 4 slot sendiri: penebak lewat broker tidak bisa mengunci BLE/WiFi lokal (dan sebaliknya). Kalau semua slot remote
+  sedang dihukum, klien remote baru ikut ditolak sampai hukuman meluruh — jalur lokal tetap jalan. Benar → `ev` hasil perintah (`ok`, `auth_ok`, …).
+- STOP remote memakai jalur yang sama dengan STOP lokal: leveling berhenti (`hold`), tersimpan di NVS, tetap aktif setelah restart sampai `preset`/`set`.
+- Tanpa tanda tangan hanya: `{"cmd":"stop"}` (→ `stop_ok`, diproses walau antrean penuh) dan `{"cmd":"live"}` (web/app kirim tiap ±20 dtk → telemetri 1×/dtk selama 60 dtk).
+- Ditolak lewat internet: `security`, `wifi`, `remote`, `rinfo` → `local_only`; `manual` dengan `fill`/`dump` → `no_manual_remote`.
+- `{"cmd":"auth"}` bertanda tangan = cek kode (→ `auth_ok`). Tidak ada sesi di modul; setiap perintah membawa tanda tangan sendiri.
+- Modul subscribe dengan *clean session*: perintah yang dikirim saat modul offline **tidak** dijalankan belakangan.

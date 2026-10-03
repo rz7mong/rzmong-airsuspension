@@ -1,5 +1,17 @@
 # Catatan perubahan
 
+## 0.4.0 — 2026-10-04 (dasar: 0.3.2)
+- **Dashboard** baru (default): mobil tampak atas dengan tekanan 4 sudut, gauge tangki, preset 1–3, ▲/▼ per as,
+  SEMUA NAIK/TURUN, STOP, status koneksi. Tema baru **Karbon Pro**. Tata letak klasik & 4 tema lama tetap ada (`?layout=classic`).
+- **Remote internet (MQTT lewat TLS)**, MATI secara default, diatur di kartu KEAMANAN → REMOTE INTERNET (hanya dari
+  BLE/WiFi lokal, wajib kode akses ≠ 1234). Web/app tersambung lewat MQTT WSS (bisa dari GitHub Pages & aplikasi).
+- Perintah remote ditandatangani HMAC-SHA256 (kunci = kode akses), nonce per koneksi + nomor urut (anti-replay).
+  Salah tanda tangan dihitung **per id klien remote** dengan aturan 0.3.2 (5× → 30 dtk, bertingkat s/d 15 mnt), kolam slot
+  terpisah dari Bluetooth/WiFi lokal. STOP tanpa tanda tangan selalu diterima dan memakai jalur STOP lokal (hold tersimpan di NVS).
+- Ditolak lewat remote: ganti keamanan/WiFi/remote, isi/buang manual.
+- Klien MQTT di task FreeRTOS terpisah (core 0) → loop katup tidak pernah menunggu internet.
+- `tools/mock_remote.py`, `tools/uji_ui_dash.py`, tes host remote, `docs/REMOTE.md` (panduan broker EMQX gratis).
+
 ## 0.3.2 — 2026-10-04
 - **Kunci salah kode per klien.** Bluetooth punya hitungan sendiri, klien WiFi dihitung per alamat IP (HTTP + WebSocket
   berbagi). Penyerang di WiFi tidak bisa lagi mengunci pemilik di Bluetooth / IP lain. Kunci bertingkat 30 dtk → 15 mnt,
